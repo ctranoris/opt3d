@@ -89,10 +89,10 @@ not installed, point it at a local Chrome with the `CHROME` environment
 variable (`CHROME="C:/Program Files/Google/Chrome/Application/chrome.exe"`);
 `shot.js` honours the same variable.
 
-Note that `--sheet` is the **eased fraction**, not the slider's percentage:
-`0` is the boom on the centreline and `1` is eased hard over, so `--sheet
-0.85` is the opposite of what the viewer's "85%" reads as. The default is the
-viewer's opening trim, 0.35.
+Note that `--sheet` is the **eased fraction** to port, not the viewer's
+boom angle: `0` is the boom on the centreline and `1` is 74° out to port.
+The viewer's own control is the signed boom angle (`state.boom`, degrees,
++ to starboard); `--sheet s` sets it to `-74·s`.
 
 ---
 
@@ -119,8 +119,11 @@ survives the trip:
 - **Vertex colours** on the hull, thwarts and bags. The hull is an outer
   white gelcoat skin plus an inner skin coloured grey on the sides and
   darker on the floor, so it reads correctly with no textures at all.
-- **One texture**, the sail cloth: class insignia, sail number, panel seams,
-  batten pockets and tell-tales.
+- **One texture**, the sail cloth after the class sail drawing: the blue
+  class insignia high in the sail, national letters over the sail number
+  set in from the leech, crosscut panels above radial panels from the clew,
+  one leech batten, two tell-tales near the mast, and a clear window above
+  the foot (cut out of the texture's alpha, so the material is transparent).
 - **Double-sided flags**, and clearcoat on the hull and sheen on the cloth,
   written as the standard `KHR_materials_clearcoat` and `KHR_materials_sheen`
   extensions.
@@ -130,7 +133,7 @@ Units are **metres**, origin at the bow on the baseline.
 ```
 +X aft   (bow at x = 0, transom at x = 2.30)
 +Y up    (y = 0 is the baseline / keel line)
-+Z to starboard
++Z to port      (so -Z is starboard)
 ```
 
 **Import notes.**
@@ -153,15 +156,16 @@ Units are **metres**, origin at the bow on the baseline.
   angle and the sheet are solved live in the viewer, so a `.glb` has whatever
   trim it was exported at — export twice at different `--sheet` values if you
   need both ends of the range.
-- **The sail reads mirrored from behind.** In the viewer, a small
-  `onBeforeCompile` shader patch flips the cloth's UV on back faces, so the
-  insignia and sail number read correctly from either side. That patch is
-  three.js shader code rather than data, so it cannot travel: in another
-  application the back face of the cloth shows the artwork mirror-imaged. If
-  that matters, give the sail a second material with a pre-mirrored texture on
-  export, or accept it — a real sail number is applied to read from both
-  sides, so the mirrored face is the less faithful option either way.
-- **The water is not part of the model.** The shader sea is scene dressing.
+- **The sail reads mirrored from the starboard side.** The cloth texture holds
+  both faces side by side: the port (+Z) face on the left half, the
+  starboard (-Z) face on the right, where the insignia, letters and number are pre-mirrored so
+  they read correctly through the cloth while seams, battens and tell-tales
+  stay where they physically are. In the viewer a small `onBeforeCompile`
+  patch moves the starboard face onto the right half. That patch is shader code,
+  not data, so it cannot travel: in another application both faces use the
+  port half, and from starboard the marks read mirror-imaged (the battens and
+  tell-tales are still in the right place).
+- **The water is not part of the model.** The shader sea, the compass rose and the wind arrow are scene dressing; the masthead wind indicator is part of the rig and is exported, set to the wind at the time of export.
 
 ### As a three.js module
 
@@ -225,21 +229,36 @@ seven camera presets.
 
 | | |
 |---|---|
-| **Mainsheet** | sheet the sail. 100% = boom on the centreline, 0% = eased hard over |
+| **Mainsheet** | boom angle, −180° to +180°: 0° on the centreline, + to starboard (S), − to port (P). Past ±90° the boom swings forward of the mast |
+| **Wind from** | compass bearing the true wind blows from (0° = north); moves the wind arrow |
+| **Heading** | compass course of the bow; turns the boat on the compass rose |
 | **Wind** | breeze strength — drives heel, sail load and luff sag |
 | **Draft** | how deep the sail is foiled |
-| **Auto sail** | sheets her in and out on its own |
+| **Auto sail** | puts the boom out to leeward at the right angle for the wind, gybing across when the wind changes side |
 | **Sea motion** | float her on the waves |
-| **Part labels** | name 19 parts with leader lines |
-| **Wireframe / Water / Turntable** | as they say |
+| **Part labels** | name 25 parts with leader lines |
+| **Turntable** | slowly turns the boat's heading (15°/s); the sail trims itself if Auto sail is on |
+| **Wireframe / Water / Compass & wind** | as they say |
 
-**Drag the sail sideways** in the viewport to sheet it. Orbit with the left
-button, zoom with the wheel.
+**Drag the sail** in the viewport to swing the boom to any angle on either
+side. Orbit with the left button, zoom with the wheel.
 
-The boom eases to **starboard**, so the wind is shown coming over the port
-side. That makes **Quarter** (the default) and **Windward** both port-side
-views, and **Leeward** the starboard one — they show opposite faces of the
-cloth. Worth knowing if you export from one of them: the artwork is mirrored
+The sail responds to the wind: a small model works out the true and
+apparent wind angles from the course, fills the cloth on the side the wind
+pushes it (it luffs and flutters when the wind runs along it, as in irons,
+and bellies the other way when aback), and sets the heel and boat speed from
+the force on the sail. She makes way at that speed: the boat stays in the
+middle of the compass rose and the sea moves past her (the waves and the
+foam drift astern), with white water drawn in the water shader - a bow
+wave, foam along her sides, churned water off the transom and the two arms
+of the wake - all growing with her speed. The readout shows the wind, heading, true wind angle,
+boom angle, heel and speed; the masthead vane points into the apparent wind.
+
+By default the wind is from the north and she heads west, so it comes over
+her **starboard** side and the boom is out to port. The **Quarter** (the
+default), **Windward**, **Leeward** and **Sail** presets turn with her
+heading and swap sides when the wind is over port, so Windward is always the
+windward side. Windward and Leeward show opposite faces of the cloth. Worth knowing if you export from one of them: the artwork is mirrored
 on the back face of a `.glb` (see [What does not
 survive](#what-does-not-survive)), so check the sail from both sides after
 import. **Plan** is the preset for judging set-up — foot fore-and-aft, sprit

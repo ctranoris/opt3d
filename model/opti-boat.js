@@ -1,7 +1,7 @@
 /**
  * Assembly: every part of an Optimist, positioned in the boat frame.
  *
- *   +X aft (bow transom top at 0), +Y up, +Z starboard.  y = 0 is the
+ *   +X aft (bow transom top at 0), +Y up, +Z port.  y = 0 is the
  *   baseline.
  *
  * Layout follows a current GRP class boat (init_assets/Optimist_dinghy_02):
@@ -82,8 +82,8 @@ function hullAndMouldings(M) {
   add(thwartGeometry(m0, m1, MAST_THWART_TOP(), 0.10), 'Mast thwart');
   const [c0, c1] = SPEC.centreThwart;
   add(thwartGeometry(c0, c1, CENTRE_THWART_TOP(), 0.07), 'Centre thwart');
-  add(floorStripGeometry(1), 'Floor pad (stbd)');
-  add(floorStripGeometry(-1), 'Floor pad (port)');
+  add(floorStripGeometry(1), 'Floor pad (port)');
+  add(floorStripGeometry(-1), 'Floor pad (stbd)');
 
   // mast hole in the mast thwart
   const hole = new THREE.Mesh(
@@ -144,8 +144,8 @@ function daggerboard(M) {
 function buoyancy(M) {
   const g = new THREE.Group();
   g.name = 'Buoyancy bags';
-  for (const [geo, name] of [[sideBagGeometry(1), 'Side bag (stbd)'],
-    [sideBagGeometry(-1), 'Side bag (port)'], [sternBagGeometry(), 'Stern bag']]) {
+  for (const [geo, name] of [[sideBagGeometry(1), 'Side bag (port)'],
+    [sideBagGeometry(-1), 'Side bag (stbd)'], [sternBagGeometry(), 'Stern bag']]) {
     const m = new THREE.Mesh(geo, M.bag);
     m.name = name;
     m.castShadow = true;
@@ -184,7 +184,7 @@ function hikingStraps(M) {
     const b = [xAft, yAft + 0.02, side * 0.025];
     const dx = b[0] - a[0], dz = b[2] - a[2];
     const strap = new THREE.Mesh(webbingGeometry(a, b, 0.048, [-dz, 0, dx], 0.035), M.webbing);
-    strap.name = side > 0 ? 'Hiking strap (stbd)' : 'Hiking strap (port)';
+    strap.name = side > 0 ? 'Hiking strap (port)' : 'Hiking strap (stbd)';
     strap.castShadow = true;
     g.add(strap);
   }

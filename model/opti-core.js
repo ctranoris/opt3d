@@ -4,7 +4,7 @@
  * Boat-local frame (right handed):
  *   +X aft   (bow transom top at x = 0, stern transom at x = SPEC.loa)
  *   +Y up    (y = 0 is the baseline: the lowest point of the bottom)
- *   +Z to starboard
+ *   +Z to port
  *
  * Where the numbers come from (init_assets/):
  *   Optimist_dinghy.png       class side profile, to scale - sheer, rocker,
@@ -31,7 +31,7 @@ export const SPEC = {
   headToPeak: 1.22,   // 4'-0"  throat -> peak
   foot: 1.93,         // 6'-4"  tack -> clew, along the boom
   leech: 2.67,        // 8'-9"  peak -> clew
-  snotter: 0.55,      // sprit heel: this far up the mast above the tack
+  snotter: 0.40,      // sprit heel: this far up the mast above the tack
   spritOver: 0.04,    // sprit tip reaches past the peak
   boomRise: 0,        // deg - the boom sits level
   mastAboveHead: 0.05,

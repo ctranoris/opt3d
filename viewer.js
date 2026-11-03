@@ -7,7 +7,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { SPEC } from './model/opti-core.js';
 import { createBoat, makeMaterials } from './model/opti-boat.js';
-import { updateRig, updateMainsheet, setSailMarks } from './model/opti-rig.js';
+import {
+  updateRig, updateMainsheet, setSailMarks, setWindVane,
+  BATTENS, TELLTALES, WINDOW, INSIGNIA,
+} from './model/opti-rig.js';
+import {
+  HULL_N, HULL_STEP, hullTable, createCompass, createWindArrow, placeWindArrow,
+  windFlow, WIND_FROM_DEG,
+} from './scene-extras.js';
 
 const D2R = Math.PI / 180;
 const boot = document.getElementById('boot');
@@ -28,10 +35,10 @@ function fail(err) {
  * sky and sun
  * ------------------------------------------------------------------ */
 
-// The wind is from port and the boom eases to starboard, so the sun has to
-// come from the port side as well: put it to starboard and the boat spends
-// every view sitting in the shadow of its own sail.  Aft of the beam on the
-// port quarter also puts the light behind the default camera, which is the
+// By default the wind is over the starboard side (-Z) and the boom is out to
+// port, so the sun comes from the starboard side as well: put it to port and
+// the boat spends every view sitting in the shadow of its own sail.  Aft of
+// the beam on the starboard quarter also puts the light behind the default camera, which is the
 // way a boat like this is normally photographed.
 const SUN_AZ = -52 * D2R;      // compass-ish azimuth of the light
 const SUN_EL = 42 * D2R;
@@ -97,8 +104,14 @@ const WAVES = [
   [0.85, 0.55, 0.009, 0.62, 1.35],
 ];
 
-/** Water surface height in the boat frame - mirrored in the shader. */
+// How far the boat has sailed, world x/z, metres.  The boat stays in the
+// middle of the compass rose and the sea moves past her instead, so the
+// waves are evaluated at (world point + odometer).
+const odo = new THREE.Vector2();
+
+/** Water surface height at a world point - mirrored in the shader. */
 function waveHeight(x, z, t) {
+  x += odo.x; z += odo.y;
   let h = 0;
   for (const [dx, dz, a, l, s] of WAVES) {
     const n = Math.hypot(dx, dz);
@@ -110,6 +123,7 @@ function waveHeight(x, z, t) {
 
 const WATER_VS = /* glsl */`
   uniform float uTime;
+  uniform vec2 uOffset;
   varying vec3 vWorld;
   varying vec3 vNrm;
 
@@ -120,7 +134,7 @@ const WATER_VS = /* glsl */`
     float k = 6.2831853 / len;
     // ease the steepness out toward the horizon
     float fade = mix(1.0, 0.35, smoothstep(6.0, 60.0, length(p)));
-    float ph = k * dot(p, d) + uTime * speed * 2.0;
+    float ph = k * dot(p + uOffset, d) + uTime * speed * 2.0;
     h += amp * fade * sin(ph);
     grad += amp * fade * k * d * cos(ph);
   }
@@ -149,8 +163,89 @@ const WATER_FS = /* glsl */`
   uniform vec3 uSunTint;
   uniform vec3 uSeaTint;
   uniform float uOpacity;
+  uniform mat4 uBoatInv;
+  uniform vec4 uHull[${HULL_N}];
+  uniform vec2 uOffset;
+  uniform float uTime;
+  uniform float uWake;
   varying vec3 vWorld;
   varying vec3 vNrm;
+
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float vnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),
+               mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+  }
+
+  // (sheer y, sheer half, bottom y, bottom half) at boat-frame station x
+  vec4 hullAt(float x) {
+    float f = clamp(x / ${HULL_STEP.toFixed(4)}, 0.0, ${(HULL_N - 1).toFixed(1)} - 0.001);
+    int i = int(f);
+    return mix(uHull[i], uHull[i + 1], f - float(i));
+  }
+
+  // True where this point of the sea lies inside the hull: the water
+  // there is the boat's interior, so it must not be drawn.
+  bool insideHull(vec3 w) {
+    vec3 b = (uBoatInv * vec4(w, 1.0)).xyz;
+    if (b.x <= 0.0 || b.x >= ${SPEC.loa.toFixed(3)}) return false;
+    vec4 h = hullAt(b.x);
+    if (b.y <= h.z || b.y >= h.x + 0.15) return false;
+    float k = clamp((b.y - h.z) / max(h.x - h.z, 1e-3), 0.0, 1.0);
+    return abs(b.z) < mix(h.w, h.y, k);
+  }
+
+  // White water made by the boat moving through it, 0..1: a bow wave
+  // and foam along her sides, churned water off the transom, and the two
+  // arms of the Kelvin wedge (19.5 deg half-angle) spreading astern.
+  // Worked out in the boat frame (+x aft, +z port); the foam's texture is
+  // fixed to the water, so it streams aft past her as she sails.
+  float wakeFoam(vec3 w) {
+    if (uWake <= 0.001) return 0.0;
+    vec3 b = (uBoatInv * vec4(w, 1.0)).xyz;
+    float L = ${SPEC.loa.toFixed(3)};
+    if (b.x < -0.6 || b.x > 16.0 || abs(b.z) > 7.0) return 0.0;
+    float foam = 0.0;
+
+    // along the hull: a band just outside her waterline, heaviest at the bow
+    if (b.x > 0.0 && b.x < L) {
+      vec4 h = hullAt(b.x);
+      float k = clamp((b.y - h.z) / max(h.x - h.z, 1e-3), 0.0, 1.0);
+      float off = abs(b.z) - mix(h.w, h.y, k);
+      float band = 0.05 + 0.10 * uWake;
+      foam += smoothstep(band, 0.0, off) * step(-0.03, off)
+            * mix(1.0, 0.45, b.x / L);
+    }
+    // a little bow wave pushed ahead of the stem
+    foam += smoothstep(0.22, 0.0, length(vec2(b.x + 0.04, b.z * 0.8))) * 0.8;
+
+    // churned water off the transom, widening and dying away astern
+    float d = b.x - L;
+    if (d > -0.05) {
+      float wT = 0.30 + 0.07 * d;
+      foam += (1.0 - smoothstep(wT * 0.3, wT, abs(b.z))) * exp(-d * 0.55);
+    }
+
+    // Kelvin arms from just ahead of the bow
+    float dd = b.x + 0.3;
+    if (dd > 0.0) {
+      float e = abs(abs(b.z) - dd * 0.354);
+      float wA = 0.06 + 0.035 * dd;
+      foam += smoothstep(wA, 0.0, e) * exp(-dd * 0.22) * smoothstep(0.0, 0.8, dd) * 1.05;
+      // the ruffled water between the arms
+      foam += step(abs(b.z), dd * 0.354) * exp(-dd * 0.35) * 0.18;
+    }
+
+    // break it up with noise that rides on the water
+    vec2 q = w.xz + uOffset;
+    float n = vnoise(q * 5.0 + vec2(0.0, uTime * 0.3)) * 0.5
+            + vnoise(q * 13.0 - uTime * 0.2) * 0.3
+            + vnoise(q * 31.0 + uTime * 0.4) * 0.2;
+    foam *= uWake;
+    return smoothstep(0.35, 0.9, foam * (0.25 + 1.2 * n));
+  }
 
   vec3 sky(vec3 d) {
     float y = max(d.y, 0.0);
@@ -163,11 +258,13 @@ const WATER_FS = /* glsl */`
   }
 
   void main() {
+    if (insideHull(vWorld)) discard;
     vec3 V = normalize(cameraPosition - vWorld);
     vec3 N = normalize(vNrm);
     // small-ripple normal detail
-    float r = sin(vWorld.x * 9.0) * sin(vWorld.z * 11.0) * 0.02
-            + sin(vWorld.x * 23.0 + 2.0) * sin(vWorld.z * 19.0) * 0.012;
+    vec2 wq = vWorld.xz + uOffset;
+    float r = sin(wq.x * 9.0) * sin(wq.y * 11.0) * 0.02
+            + sin(wq.x * 23.0 + 2.0) * sin(wq.y * 19.0) * 0.012;
     N = normalize(N + vec3(r, 0.0, r * 0.7));
 
     float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
@@ -183,6 +280,11 @@ const WATER_FS = /* glsl */`
     col += uSunTint * spec * 4.0;
     float path = pow(max(dot(normalize(vec3(R.x, 0.0, R.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), 0.0), 6.0);
     col += uSunTint * path * smoothstep(0.55, 1.0, fres) * 0.10;
+
+    // white water, lit by the sun and the sky
+    float foam = wakeFoam(vWorld);
+    vec3 foamCol = vec3(0.86, 0.90, 0.93) * (0.75 + 0.35 * max(dot(N, uSun), 0.0));
+    col = mix(col, foamCol, foam * 0.92);
 
     // atmospheric haze: fade to the sky just above the horizon in the
     // view direction, so the rim of the plane cannot be seen
@@ -201,9 +303,14 @@ const WATER_FS = /* glsl */`
  * ------------------------------------------------------------------ */
 
 let renderer, scene, camera, controls, boat, water, sun, pmrem;
+let compass, windArrow, helm;
+const MID = 1.15;   // midship, boat x: the heading turns about this point
 const state = {
-  // how far the boom is eased; the slider reports its complement as mainsheet %
-  sheet: 0.35,
+  // Boom angle off the centreline, degrees: + to starboard, - to port.
+  // The mainsheet slider sets it directly, -180..180.
+  boom: -26,
+  windFrom: WIND_FROM_DEG,  // compass bearing the true wind blows from
+  heading: 270,             // compass course of the bow
   wind: 0.45,
   camber: 0.55,
   autoSail: true,
@@ -212,22 +319,20 @@ const state = {
   wire: false,
   spin: false,
   t: 0,
+  // solved every frame from the wind, the course and the trim
+  fill: 1,      // -1..1: which side the wind fills the sail, and how much
+  speed: 0,     // boat speed, in the same units as `wind`
+  heel: 0,      // degrees, + to port
+  twa: 0, awa: 0, app: 0,
+  // the old 0..1 "eased" control, kept for scripts: eased to port
+  get sheet() { return Math.min(1, Math.abs(this.boom) / 74); },
+  set sheet(v) { this.boom = -v * 74; },
 };
 
-// state.sheet is how far the boom is eased - 0 on the centreline, 1 hard over -
-// because that is the angle the rig and the sail-drag solve for.  The slider is
-// a mainsheet, which reads the other way: pull it in and the boom comes in.
-// These two are the only places the sense turns over.
-const sheetToSlider = (s) => Math.round((1 - s) * 100);
-const sliderToSheet = (v) => 1 - v / 100;
-
-/**
- * Heel angle in degrees for the current trim, before the sea-state scale.
- * Sheet her in and she is powered up and stands up less; ease her and the
- * sail spills and she comes upright, so the heeling force runs off one minus
- * the eased fraction.
- */
-const heelDeg = () => state.wind * (5 + 13 * (1 - state.sheet));
+const pad3 = (d) => String(Math.round(((d % 360) + 360) % 360) % 360).padStart(3, '0');
+const POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const cardinal = (d) => POINTS[Math.round((((d % 360) + 360) % 360) / 45) % 8];
+const fmtBoom = (b) => (Math.abs(b) < 0.5 ? '0°' : `${Math.abs(b).toFixed(0)}° ${b > 0 ? 'S' : 'P'}`);
 
 // Framing: the rig reaches ~2.35 m above the baseline and the board hangs
 // to -0.55 m, so a view has to clear ~3 m of height.  At 38 deg vertical
@@ -247,6 +352,26 @@ const CAMS = {
   top: { pos: [1.15, 7.5, 0.001], tgt: [1.15, 0, 0] },
   sail: { pos: [4.0, 2.0, -3.2], tgt: [1.3, 1.8, 0.25] },
 };
+
+/**
+ * A camera preset in world space.  The presets are written for the boat
+ * heading west with the wind over her starboard side (the default); turn
+ * them with her heading, and mirror the side-on ones when the wind is
+ * from port so "Windward" stays windward.
+ */
+const SIDED = new Set(['quarter', 'windward', 'leeward', 'sail']);
+function camFor(name) {
+  const c = CAMS[name];
+  const p = new THREE.Vector3(...c.pos), q = new THREE.Vector3(...c.tgt);
+  if (SIDED.has(name) && windFromPort()) { p.z = -p.z; q.z = -q.z; }
+  const yaw = -(state.heading + 90) * D2R;
+  for (const v of [p, q]) {
+    v.x -= MID;
+    v.applyAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
+    v.x += MID;
+  }
+  return { pos: p.toArray(), tgt: q.toArray() };
+}
 
 function init() {
   const app = document.getElementById('app');
@@ -311,6 +436,10 @@ function init() {
       uSunTint: { value: SUN_TINT.clone() },
       uSeaTint: { value: SEA_TINT.clone() },
       uOpacity: { value: 1 },
+      uBoatInv: { value: new THREE.Matrix4() },
+      uHull: { value: hullTable() },
+      uOffset: { value: odo },
+      uWake: { value: 0 },
     },
     side: THREE.DoubleSide,
   });
@@ -321,13 +450,31 @@ function init() {
 
   // ---- the boat --------------------------------------------------
   boat = createBoat(makeMaterials());
-  scene.add(boat.group);
+  // The heading turns the boat about her midship, so she stays in the
+  // middle of the compass rose.  Heel and pitch stay on boat.group.
+  helm = new THREE.Group();
+  helm.name = 'Heading';
+  helm.position.set(MID, 0, 0);
+  helm.add(boat.group);
+  boat.group.position.x = -MID;
+  scene.add(helm);
+
+  // ---- compass rose on the water, and the wind arrow ---------------
+  // North is -Z.  By default the wind is from the north and the boat
+  // heads west, so it comes over her starboard side and the boom goes out
+  // to port.  Both are set from the panel.
+  compass = createCompass();
+  compass.position.set(1.15, 0.12, 0);
+  scene.add(compass);
+  windArrow = createWindArrow();
+  placeWindArrow(windArrow, compass.position, state.windFrom);
+  scene.add(windArrow);
 
   // The mainsheet line is a child of the raked rig group, so the cleat
   // must be expressed in that group's frame, not the boat's.  Both are
   // children of the boat, so the rig's local matrix converts between them
   // without depending on how the boat happens to be sitting.
-  boat.group.updateMatrixWorld(true);
+  helm.updateMatrixWorld(true);
   const toRig = new THREE.Matrix4().copy(boat.rig.group.matrix).invert();
   boat.cleatRig = boat.cleatLocal.clone().applyMatrix4(toRig);
 
@@ -403,52 +550,137 @@ function animate() {
     if (fly.t >= 1) fly = null;
   }
 
-  if (state.autoSail) {
-    state.sheet = 0.42 + 0.26 * Math.sin(t * 0.31) + 0.07 * Math.sin(t * 0.83 + 1.1);
-    state.sheet = Math.min(1, Math.max(0, state.sheet));
-    ui.sheet.value = sheetToSlider(state.sheet);
-    document.getElementById('sheetOut').textContent = ui.sheet.value + '%';
-  }
+  if (state.spin) setHeading(state.heading + dt * 15);   // turntable
 
-  // Float on the water.  The boat frame is +X aft, +Y up, +Z starboard,
-  // so heel is a rotation about X and pitch a rotation about Z.  The sail
-  // is to starboard when eased, so the wind is from port and the leeward
-  // (starboard) side goes down: a positive roll.
+  sailTrim(dt, t);
+
+  // Make way: move the sea astern at her speed (kn -> m/s).
+  const ms = state.speed * 18 * 0.5144;
+  odo.x += bowV.x * ms * dt;
+  odo.y += bowV.z * ms * dt;
+
+  // Float on the water.  The boat frame is +X aft, +Y up, +Z to port, so
+  // heel is a rotation about X (+ heels to port) and pitch one about Z.
+  helm.rotation.y = -(state.heading + 90) * D2R;
   const y0 = -SPEC.waterline;
-  const heel = heelDeg() * D2R;
+  const heel = state.heel * D2R;
   if (state.seaMotion) {
-    const h = waveHeight(1.15, 0, t);
-    const hF = waveHeight(SPEC.loa, 0, t);
-    const hA = waveHeight(0, 0, t);
+    // sample the sea under the midship, the bow and the stern, wherever
+    // she happens to point
+    const bx = Math.sin(state.heading * D2R), bz = -Math.cos(state.heading * D2R);
+    const aft = SPEC.loa - MID;
+    const h = waveHeight(MID, 0, t);
+    const hF = waveHeight(MID - bx * aft, -bz * aft, t);
+    const hA = waveHeight(MID + bx * MID, bz * MID, t);
     boat.group.position.y = y0 + h;
     boat.group.rotation.z = Math.atan2(hF - hA, SPEC.loa) * 0.85;
     boat.group.rotation.x = heel * (0.82 + 0.18 * Math.sin(t * 0.9));
     boat.group.rotation.y = 0.03 * Math.sin(t * 0.4) - heel * 0.25;
   } else {
-    boat.group.position.y = y0 + waveHeight(1.15, 0, t) * 0.15;
+    boat.group.position.y = y0 + waveHeight(MID, 0, t) * 0.15;
     boat.group.rotation.set(heel * 0.55, 0, 0);
-  }
-
-  if (state.spin) {
-    boat.group.rotation.y += dt * 0.28;
   }
 
   // rig: trim the sail, then string the mainsheet to the cleat
   updateRig(boat.rig, {
-    boomOut: state.sheet,
+    boomDeg: state.boom,
+    fill: state.fill,
     camber: 0.35 + state.camber * 1.3,
     wind: state.wind,
+    t,
   });
-  boat.group.updateMatrixWorld(true);
+  helm.updateMatrixWorld(true);
   updateMainsheet(boat.rig, boat.cleatRig);
 
   water.material.uniforms.uTime.value = t;
+  water.material.uniforms.uWake.value = Math.min(1.2, (state.speed * 18) / 3);
+  water.material.uniforms.uBoatInv.value.copy(boat.group.matrixWorld).invert();
+
+  // the masthead vane shows the apparent wind
+  setWindVane(boat.rig, appFlow, t);
+  windArrow.userData.update(t, state.wind, state.windFrom, camera);
   controls.update();
   renderer.render(scene, camera);
 
   if (state.labels) drawLabels();
   updateReadout();
   requestAnimationFrame(animate);
+}
+
+/* ------------------------------------------------------------------ *
+ * sailing: wind, trim, speed and heel
+ *
+ * A small steady-state model, just enough for the sail, the vane and the
+ * heel to agree with the wind and the course.  All in the horizontal plane.
+ * ------------------------------------------------------------------ */
+
+const trueFlow = new THREE.Vector3(), appFlow = new THREE.Vector3();
+const bowV = new THREE.Vector3(), portV = new THREE.Vector3();
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const smoothstep = (e0, e1, x) => { const u = clamp((x - e0) / (e1 - e0), 0, 1); return u * u * (3 - 2 * u); };
+
+/** Boom angle off the centreline that sets the sail for an apparent wind angle. */
+const optimalBoom = (awa) => clamp(awa * 0.55 - 12, 0, 88);
+
+/** Bow and port unit vectors in the world for the current heading. */
+function courseVectors() {
+  const h = state.heading * D2R;
+  bowV.set(Math.sin(h), 0, -Math.cos(h));
+  portV.set(-Math.cos(h), 0, -Math.sin(h));      // the boat's +Z
+}
+
+/** True when the true wind comes over the port side. */
+function windFromPort() {
+  courseVectors();
+  windFlow(state.windFrom, trueFlow);
+  return trueFlow.dot(portV) < 0;                // air moving to starboard
+}
+
+function sailTrim(dt, t) {
+  courseVectors();
+  windFlow(state.windFrom, trueFlow);
+  state.twa = Math.acos(clamp(-trueFlow.dot(bowV), -1, 1)) / D2R;
+
+  // Apparent wind: the true wind less the boat's own way through the water.
+  appFlow.copy(trueFlow).multiplyScalar(state.wind).addScaledVector(bowV, -state.speed);
+  const ax = -appFlow.dot(bowV);                 // boat frame: air moving aft
+  const az = appFlow.dot(portV);                 // ... and toward port
+  const app = Math.hypot(ax, az);
+  state.app = app;
+  state.awa = app > 1e-5 ? Math.acos(clamp(ax / app, -1, 1)) / D2R : 0;
+
+  if (state.autoSail) {
+    // boom to leeward; dead downwind, stay on the gybe she is on
+    let side = az > 0 ? -1 : 1;                  // air going to port: boom to port
+    if (state.awa > 168 && Math.abs(state.boom) > 1) side = Math.sign(state.boom);
+    const want = side * Math.max(0, optimalBoom(state.awa)
+      + 3 * Math.sin(t * 0.31) + 1.5 * Math.sin(t * 0.83 + 1.1));
+    const step = 70 * dt;                        // the boom swings across, not jumps
+    state.boom += clamp(want - state.boom, -step, step);
+    showBoom();
+  }
+
+  // How the wind meets the cloth: its component across the sail's chord.
+  // For boom angle a the side the cloth bellies to when fill > 0 is
+  // (sin a, cos a) in the boat's (aft, port) plane.
+  const a = state.boom * D2R;
+  const across = app > 1e-5 ? (ax * Math.sin(a) + az * Math.cos(a)) / app : 0;
+  const fillT = clamp(across / 0.35, -1, 1);
+  state.fill += clamp(fillT - state.fill, -6 * dt, 6 * dt);
+
+  // Force normal to the sail: drive ahead, and heel.
+  const cn = clamp(4 * across, -1.2, 1.2);
+  const drive = -cn * Math.sin(a);               // forward is -x
+  const heelT = 14 * app * cn * Math.cos(a);     // + heels to port
+  state.heel += (heelT - state.heel) * Math.min(1, dt / 0.9);
+
+  // Speed: a simple polar for the course, scaled by how well she is
+  // trimmed - nothing in irons, nothing with the sail aback.
+  const polar = smoothstep(32, 75, state.twa) * (1 - 0.12 * smoothstep(110, 180, state.twa));
+  const trim = Math.max(0, 1 - Math.abs(Math.abs(state.boom) - optimalBoom(state.awa)) / 50);
+  const e = drive > 0 ? trim * Math.min(1, Math.abs(state.fill)) : 0;
+  const target = 0.42 * state.wind * polar * e;
+  state.speed += (target - state.speed) * Math.min(1, dt / 2.5);
 }
 
 /* ------------------------------------------------------------------ *
@@ -463,11 +695,16 @@ const PARTS = [
   ['Mast', () => rigPoint('head', -0.01, -0.25)],
   ['Luff of sail', () => rigPoint('mid-luff', 0.06, 0.25)],
   ['Leech of sail', () => rigPoint('mid-leech', 0.26, 0.10)],
-  ['Batten', () => rigPoint('mid-leech', 0.10, -0.16)],
+  ['Batten', () => { const c = boat.rig.corners, f = BATTENS[0];
+    return rigPoint('xy', c.corner.x + (c.peak.x - c.corner.x) * f - 0.18,
+      c.corner.y + (c.peak.y - c.corner.y) * f - 0.06); }],
+  ['Tell-tales', () => rigPoint('xy', TELLTALES[0][0] + 0.06, TELLTALES[0][1])],
+  ['Window', () => rigPoint('xy', (WINDOW.x0 + WINDOW.x1) / 2, (WINDOW.y0 + WINDOW.y1) / 2 + 0.02)],
   ['Foot of sail', () => rigPoint('mid-foot', 0.25, 0.06)],
   ['Boom', () => rigPoint('mid-foot', -0.35, -0.03)],
   ['Tack / gooseneck', () => rigPoint('tack', -0.01, 0)],
-  ['Optimist insignia', () => rigPoint('mid-sail', 0.30, 0.34)],
+  ['Optimist insignia', () => rigPoint('xy', INSIGNIA.x, INSIGNIA.y)],
+  ['Wind indicator', () => boat.group.getObjectByName('Wind indicator').getWorldPosition(new THREE.Vector3())],
   ['Air bag', () => boatPoint(0.85, 0.20, 0.37)],
   ['Mast thwart', () => boatPoint(0.32, 0.37, -0.25)],
   ['Centre thwart', () => boatPoint(1.28, 0.35, -0.35)],
@@ -497,6 +734,7 @@ function rigPoint(which, dx, dy) {
     case 'mid-luff': p = { x: c.head.x * 0.5, y: c.head.y * 0.5 }; break;
     case 'mid-foot': p = { x: c.corner.x * 0.5, y: c.corner.y * 0.5 }; break;
     case 'mid-leech': p = { x: (c.peak.x + c.corner.x) / 2, y: (c.peak.y + c.corner.y) / 2 }; break;
+    case 'xy': p = { x: 0, y: 0 }; break;   // dx, dy are the point itself
     case 'mid-sail': p = { x: c.corner.x * 0.42, y: c.head.y * 0.62 }; break;
     default: p = { x: 0, y: 0 };
   }
@@ -622,12 +860,13 @@ function drawLabels() {
 
 const readout = document.getElementById('readout');
 function updateReadout() {
-  const boomDeg = (state.sheet * 74).toFixed(0);
-  const heel = (heelDeg() * (state.seaMotion ? 1 : 0.55)).toFixed(1);
+  const heel = state.heel * (state.seaMotion ? 1 : 0.55);
   const kn = (state.wind * 18).toFixed(0);
+  const side = windFromPort() ? 'port' : 'stbd';
   readout.innerHTML =
-    `<b>${kn} kn</b> wind &nbsp; <b>${sheetToSlider(state.sheet)}%</b> sheet<br>` +
-    `boom <b>${boomDeg}&deg;</b> &nbsp; heel <b>${heel}&deg;</b><br>` +
+    `<b>${kn} kn</b> wind from <b>${pad3(state.windFrom)}&deg; ${cardinal(state.windFrom)}</b><br>` +
+    `heading <b>${pad3(state.heading)}&deg; ${cardinal(state.heading)}</b> &nbsp; TWA <b>${state.twa.toFixed(0)}&deg;</b> ${side}<br>` +
+    `boom <b>${fmtBoom(state.boom)}</b> &nbsp; heel <b>${Math.abs(heel).toFixed(1)}&deg;</b> &nbsp; speed <b>${(state.speed * 18).toFixed(1)} kn</b><br>` +
     `LOA 2.30 m &middot; beam 1.13 m &middot; sail <b>${sailArea.toFixed(1)} m&sup2;</b>`;
 }
 
@@ -662,6 +901,7 @@ function bindUI() {
   ui.autoSail = $('autoSail'); ui.seaMotion = $('seaMotion');
   ui.labels = $('labelsChk'); ui.wire = $('wireChk');
   ui.water = $('waterChk'); ui.spin = $('spinChk');
+  ui.windDir = $('windDir'); ui.heading = $('heading');
   ui.sailCountry = $('sailCountry'); ui.sailNumber = $('sailNumber');
 
   // The two lines on the cloth: national letters over the sail number.
@@ -681,10 +921,10 @@ function bindUI() {
   ui.sailNumber.addEventListener('input', applyMarks);
 
   const sync = () => {
-    state.sheet = sliderToSheet(+ui.sheet.value);
+    state.boom = +ui.sheet.value;
     state.wind = ui.wind.value / 100;
     state.camber = ui.camber.value / 100;
-    $('sheetOut').textContent = ui.sheet.value + '%';
+    showBoom();
     $('windOut').textContent = (state.wind * 18).toFixed(0) + ' kn';
     $('camberOut').textContent = ui.camber.value + '%';
   };
@@ -692,6 +932,10 @@ function bindUI() {
     if (k === 'sheet') { state.autoSail = false; ui.autoSail.checked = false; }
     sync();
   }));
+  ui.windDir.addEventListener('input', () => setWindFrom(+ui.windDir.value));
+  ui.heading.addEventListener('input', () => setHeading(+ui.heading.value));
+  setWindFrom(state.windFrom);
+  setHeading(state.heading);
 
   ui.autoSail.addEventListener('change', () => { state.autoSail = ui.autoSail.checked; });
   ui.seaMotion.addEventListener('change', () => { state.seaMotion = ui.seaMotion.checked; });
@@ -714,12 +958,16 @@ function bindUI() {
     });
   });
   ui.water.addEventListener('change', () => { water.visible = ui.water.checked; });
+  ui.compass = $('compassChk');
+  if (ui.compass) ui.compass.addEventListener('change', () => {
+    compass.visible = windArrow.visible = ui.compass.checked;
+  });
 
   document.getElementById('cams').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-cam]');
     if (!b) return;
     document.querySelectorAll('#cams button').forEach((x) => x.classList.toggle('on', x === b));
-    flyTo(CAMS[b.dataset.cam]);
+    flyTo(camFor(b.dataset.cam));
   });
 
   const panel = document.getElementById('panel');
@@ -743,11 +991,11 @@ function bindUI() {
     const pp = boat.group.position.clone();
     boat.group.quaternion.identity();
     boat.group.position.set(0, 0, 0);
-    boat.group.updateMatrixWorld(true);
+    helm.updateMatrixWorld(true);
     const restore = () => {
       boat.group.quaternion.copy(pq);
       boat.group.position.copy(pp);
-      boat.group.updateMatrixWorld(true);
+      helm.updateMatrixWorld(true);
     };
     exporter.parse(
       boat.group,
@@ -766,6 +1014,27 @@ function bindUI() {
   });
 
   sync();
+}
+
+function showBoom() {
+  ui.sheet.value = Math.round(state.boom);
+  document.getElementById('sheetOut').textContent = fmtBoom(state.boom);
+}
+
+/** Set the compass bearing the wind blows from, and move the arrow. */
+function setWindFrom(deg) {
+  state.windFrom = ((deg % 360) + 360) % 360;
+  ui.windDir.value = Math.round(state.windFrom) % 360;
+  document.getElementById('windDirOut').textContent = `${pad3(state.windFrom)}° ${cardinal(state.windFrom)}`;
+  placeWindArrow(windArrow, compass.position, state.windFrom);
+  windArrow.userData.setLabel(`WIND ${pad3(state.windFrom)}° ${cardinal(state.windFrom)}`);
+}
+
+/** Set the compass course the bow points to. */
+function setHeading(deg) {
+  state.heading = ((deg % 360) + 360) % 360;
+  ui.heading.value = Math.round(state.heading) % 360;
+  document.getElementById('headingOut').textContent = `${pad3(state.heading)}° ${cardinal(state.heading)}`;
 }
 
 /* camera fly-to, eased inside animate() */
@@ -804,13 +1073,12 @@ function pointerToSheet(ev) {
   boat.group.worldToLocal(hit);
   const dx = hit.x - SPEC.mastFromBow;
   const dz = hit.z;
-  if (dx <= 0.02) return;
-  const ang = Math.atan2(dz, dx);
-  state.sheet = Math.min(1, Math.max(0, ang / (74 * D2R)));
-  ui.sheet.value = sheetToSlider(state.sheet);
+  if (Math.hypot(dx, dz) < 0.1) return;
+  // + to starboard, which is the boat's -z
+  state.boom = Math.atan2(-dz, dx) / D2R;
   ui.autoSail.checked = false;
   state.autoSail = false;
-  document.getElementById('sheetOut').textContent = ui.sheet.value + '%';
+  showBoom();
 }
 
 function bindDrag() {
@@ -866,6 +1134,11 @@ window.OPTi = {
   get state() { return state; },
   get scene() { return scene; },
   get camera() { return camera; },
+  get controls() { return controls; },
+  get water() { return water; },
+  odo,
+  get helm() { return helm; },
+  setHeading, setWindFrom, camFor,
   CAMS,
   /** Resolves after `n` rendered frames - the only reliable way to wait
    *  for a state change to reach the screen under a slow software GL. */

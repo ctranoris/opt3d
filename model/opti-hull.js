@@ -1,6 +1,6 @@
 /**
  * Hull moulding and the fixed parts inside it, as BufferGeometries in the
- * boat frame (+X aft from the bow transom top, +Y up, +Z starboard).
+ * boat frame (+X aft from the bow transom top, +Y up, +Z port).
  *
  * A modern GRP Optimist is an open pram: no decks, just a moulded shell
  * with a rolled gunwale, two moulded thwarts (the mast thwart forward and
@@ -27,12 +27,12 @@ const THWART = [0.94, 0.945, 0.948];
  * hull shell
  * ------------------------------------------------------------------ */
 
-/** A full section, port sheer -> bottom -> starboard sheer, as [y, z]. */
+/** A full section, starboard sheer (-z) -> bottom -> port sheer (+z), as [y, z]. */
 export function fullSection(x, inset = 0) {
   const half = halfSection(x, inset);
-  const port = half.map(([y, z]) => [y, -z]);
-  const stbd = half.slice(0, -1).reverse();
-  return port.concat(stbd);
+  const stbd = half.map(([y, z]) => [y, -z]);
+  const port = half.slice(0, -1).reverse();
+  return stbd.concat(port);
 }
 
 /** Stations: dense round the bow transom knuckle, even elsewhere. */
@@ -84,7 +84,7 @@ export function hullGeometry() {
 function sheerLoop() {
   const pts = [];
   const xs = range(0, loa, 36);
-  for (const x of xs) pts.push([x, sheerY(x), sheerHalf(x)]);            // stbd, fwd->aft
+  for (const x of xs) pts.push([x, sheerY(x), sheerHalf(x)]);            // port, fwd->aft
   for (const z of range(sheerHalf(loa), -sheerHalf(loa), 12).slice(1, -1)) {
     pts.push([loa, sheerY(loa), z]);                                     // stern top
   }
@@ -158,7 +158,7 @@ export function thwartGeometry(x0, x1, yTop, depth) {
   for (const a of range(Math.PI / 2, 0, 5)) out.push([x1 - rr + Math.cos(a) * rr, yTop - rr + Math.sin(a) * rr]);
   out.push([x1, yBot]);
 
-  // each outline point is a ring across the boat: port end -> starboard end
+  // each outline point is a ring across the boat: starboard end -> port end
   const ring = ([x, y]) => {
     const h = insideHalf(x, y) + 0.002;
     return [[x, y, -h], [x, y, h]];
@@ -243,8 +243,8 @@ function capsule(at, axis, n = 40, radial = 18, flip = false) {
   return toGeometry(THREE, m);
 }
 
-const BAG = [0.56, 0.58, 0.60];
-const BAG_STRAP = [0.86, 0.87, 0.88];
+const BAG = [0.93, 0.19, 0.015];      // orange PVC (linear RGB)
+const BAG_STRAP = [0.035, 0.035, 0.04]; // black webbing straps
 
 function bagColour(d, bands) {
   for (const b of bands) if (Math.abs(d - b) < 0.016) return BAG_STRAP;

@@ -4,7 +4,7 @@
  * mainsheet swings the whole rig about the mast and reshapes the cloth.
  *
  * Rig-local frame, origin at the tack:
- *   +Y up the mast, +X aft, +Z to starboard (leeward).
+ *   +Y up the mast, +X aft, +Z to port (leeward).
  *
  * Sail corners, from the class sail lengths (SBM plan / class drawing):
  *   luff  1.68 (tack -> throat, on the mast)
@@ -98,15 +98,17 @@ export function mastFrame(stepY) {
 const SAIL_S = 30;
 const SAIL_T = 26;
 
-// Where the spars sit relative to the cloth plane.  +z is to leeward: the
-// wind pushes the cloth that way, so the sprit - which the leech is laced
-// to - lives on the leeward face, and the boom, which the foot is laced
-// into, on the windward face.  The sprit is a straight spar, so where it
-// crosses the face of the sail it presses the cloth flat against itself;
-// sailGeometry() solves that contact below.
+// Where the spars sit relative to the cloth plane.  +z is port, which
+// is leeward with the boom eased to port: the cloth bellies that way.
+// The sprit lies across the starboard face of the sail (SPRIT_SIDE = -1), the
+// face the reference drawing shows it on, and the boom, which the foot is
+// laced into, sits just to port.  The sprit is a straight spar, so
+// wherever the cloth would pass through it, it is held clear of the spar;
+// sailGeometry() solves that contact below for either side.
 const BOOM_Z = 0.004;
-const SPRIT_HOOK_Z = 0.024; // the sprit's centreline where it hooks on
-const SPRIT_PEAK_Z = 0.016; // ... and at the peak, where the cloth is flat
+const SPRIT_SIDE = -1;      // -1 starboard face, +1 port face
+const SPRIT_HOOK_Z = 0.024 * SPRIT_SIDE; // sprit centreline at the snotter
+const SPRIT_PEAK_Z = 0.016 * SPRIT_SIDE; // ... and at the peak
 const SPRIT_R0 = 0.016;     // spar radius at the heel
 const SPRIT_R1 = 0.0135;    // ... and at the peak
 const CLOTH = 0.006;        // half a skin, so the cloth lies over the spar
@@ -130,12 +132,15 @@ function leechPoint(corner, peak, t, hollow) {
 
 /**
  * @param corners  rig corners
- * @param o        { camber, twist, hollow, luffSag, footSag }
+ * @param o        { camber, twist, hollow, luffSag, footSag, side, flutter, phase }
+ *                 side: +1 bellies to +z (port of the cloth), -1 to -z.
+ *                 flutter: amplitude (m) of a luffing ripple, phase its time.
  */
 export function sailGeometry(corners, o = {}) {
   const {
     camber = 0.085, twist = 0.16, hollow = -0.045,
     luffSag = 0.035, footSag = 0.012,
+    side = 1, flutter = 0, phase = 0,
   } = o;
 
   const { tack, head, peak, corner } = corners;
@@ -166,6 +171,7 @@ export function sailGeometry(corners, o = {}) {
       let px = L.x + (R.x - L.x) * s;
       let py = L.y + (R.y - L.y) * s;
       let pz = 0;
+      const flatX = px, flatY = py;   // the unsailed point, for the uv
 
       // Spanwise envelope: nil on the luff and the leech, full mid-chord.
       // Everything that pulls the cloth out of the rig plane goes through
@@ -181,8 +187,8 @@ export function sailGeometry(corners, o = {}) {
       // leeward, both fading out at the leech so the edge stays on the
       // sprit.  The foot is laced into the boom, so it stays put.
       const chord = Math.hypot(R.x - L.x, R.y - L.y);
-      const draft = camber * (chord / 2.2) * env * belly * 2.4;
-      const sag = luffSag * Math.sin(PI * t) * Math.pow(Math.max(0, 1 - s), 1.7);
+      const draft = side * camber * (chord / 2.2) * env * belly * 2.4;
+      const sag = side * luffSag * Math.sin(PI * t) * Math.pow(Math.max(0, 1 - s), 1.7);
       pz += draft + sag;
       py -= footSag * Math.sin(PI * s) * Math.pow(Math.max(0, 1 - t), 2.0);
 
@@ -190,32 +196,38 @@ export function sailGeometry(corners, o = {}) {
       // leeward.  Only the camber rotates - the luff sag belongs to the
       // mast, which does not twist.  Eased to nothing at the leech so the
       // peak and clew cannot drift off their spars.
-      const tws = tw * env;
+      const tws = side * tw * env;
       const cosT = Math.cos(tws), sinT = Math.sin(tws);
       const rx = px - L.x, rz = draft;
       px = L.x + rx * cosT - rz * sinT;
       pz = rx * sinT + rz * cosT;
 
-      // The sprit is a straight spar laced to the leech on the leeward
-      // face, so where it crosses the face of the sail it presses the cloth
-      // flat against itself.  Solve that contact: find how far this point
-      // sits from the sprit's trace across the cloth, and pull it back
-      // behind the spar where the lacing holds it.  This is what gives an
-      // Opti sail its crease along the sprit, with the head panel and the
-      // lower panel bellied separately.
+      // Luffing: with the wind along the cloth the sail shakes, a ripple
+      // running aft from the luff.  Nil on the spars that hold the edges.
+      if (flutter) {
+        pz += flutter * Math.sin(PI * s) * Math.min(1, t / 0.12) * Math.min(1, (1 - t) / 0.1)
+          * Math.sin(11 * s + 5 * t - phase);
+      }
+
+      // The sprit is a straight spar across one face of the sail, so the
+      // cloth cannot pass through it.  Find how far this point sits from
+      // the sprit's trace across the cloth, and where it would be inside
+      // the spar, hold it against the spar's surface instead.  With the
+      // sprit on the leeward face this gives the crease along the sprit;
+      // on the windward face the cloth bellies away and rarely touches.
       const ax = px - spritA.x, ay = py - spritA.y;
       let u = (ax * sbx + ay * sby) / slen2;
       u = Math.min(1, Math.max(0, u));
       const dx = px - (spritA.x + sbx * u), dy = py - (spritA.y + sby * u);
       const near = Math.exp(-((dx * dx + dy * dy) / (SPRIT_W * SPRIT_W)));
-      const ceiling = SPRIT_HOOK_Z + (SPRIT_PEAK_Z - SPRIT_HOOK_Z) * u
-        - (SPRIT_R0 + (SPRIT_R1 - SPRIT_R0) * u) - CLOTH;
-      const proud = pz - ceiling;
-      if (proud > 0) pz -= near * proud;
+      const face = SPRIT_HOOK_Z + (SPRIT_PEAK_Z - SPRIT_HOOK_Z) * u
+        - SPRIT_SIDE * (SPRIT_R0 + (SPRIT_R1 - SPRIT_R0) * u + CLOTH);
+      const proud = (pz - face) * SPRIT_SIDE;
+      if (proud > 0) pz -= near * proud * SPRIT_SIDE;
 
       pos.push(px, py, pz);
       nor.push(0, 0, 1);
-      uv.push(s, t);
+      uv.push(...sailUV(flatX, flatY));
     }
   }
 
@@ -237,135 +249,315 @@ export function sailGeometry(corners, o = {}) {
 }
 
 /* ------------------------------------------------------------------ *
- * sail cloth texture.  u = 0 at the luff, v = 0 at the foot; canvas
- * row 0 is the top of the image, i.e. v = 1, the head of the sail.
+ * sail cloth texture
+ *
+ * The cloth is mapped by a flat, uniform projection of the sail plane:
+ * one texture unit is TEX_SPAN metres in both directions, so lettering
+ * keeps its proportions whatever shape the four corners make.  Everything
+ * painted on it is placed in metres in the rig frame (+x aft, +y up the
+ * mast, origin at the tack).
+ *
+ * The canvas holds two copies of the cloth side by side.  The left half
+ * is the port face and the right half the starboard face.  They share
+ * everything sewn through the cloth: seams, batten pockets and
+ * tell-tales sit in the same place on both.  Only the printed marks
+ * differ.  The insignia, national letters and sail number are printed on
+ * each face to read correctly from that side, so on the starboard half they
+ * are mirrored about their own centres rather than the whole sheet being
+ * flipped.  The geometry's u runs 0..0.5 across the port half, and
+ * the cloth shader shifts the starboard face (the front face, by the grid's
+ * winding) into the right half.
  * ------------------------------------------------------------------ */
 
 /** The printed marks: national letters over the sail number. */
 export const SAIL_MARKS = { country: 'GRE', number: '1062' };
 
-// The block of cloth the two lines live on: forward of the batten pockets
-// and below the sprit's trace, which crosses this part of the sail at
-// about v = 0.65 + 0.45u.  Lines are centred at u = 0.38.
-const MARKS_U = 0.38;
-const MARKS_COUNTRY_V = 0.53;   // baseline of the national letters
-const MARKS_NUMBER_V = 0.385;   // baseline of the sail number
+const TEX_X0 = -0.06;   // rig-frame metres at texture u = 0 ...
+const TEX_Y0 = -0.06;   // ... and v = 0
+const TEX_SPAN = 2.66;  // metres covered by one half of the texture
+const TEX_N = 1024;     // pixels per half
 
-/**
- * One line of class-style lettering, centred on (u, v) as a baseline,
- * shrinking the font until it fits within maxW of the cloth's width so a
- * five-digit number still sits clear of the battens.
- */
-function drawMarkLine(g, W, H, text, u, v, size, maxW, color) {
-  if (!text) return;
-  let px = Math.round(W * size);
-  g.font = `bold ${px}px -apple-system, system-ui, sans-serif`;
-  const w = g.measureText(text).width;
-  const lim = W * maxW;
-  if (w > lim) {
-    px = Math.max(8, Math.round(px * lim / w));
-    g.font = `bold ${px}px -apple-system, system-ui, sans-serif`;
-  }
-  g.fillStyle = color;
-  g.textAlign = 'center';
-  g.fillText(text, W * u, H * (1 - v));
+/** Flat (unsailed) rig-frame point -> geometry uv, port half. */
+export function sailUV(x, y) {
+  return [0.5 * (x - TEX_X0) / TEX_SPAN, (y - TEX_Y0) / TEX_SPAN];
 }
 
-export function sailTexture(marks = SAIL_MARKS) {
-  const W = 640, H = 640;
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const g = c.getContext('2d');
+// Layout after the class sail drawing (init_assets/S-OD_Optimist_R6_
+// Mainsail_416x.webp): the insignia high in the sail between the head and
+// the leech, national letters over the sail number tucked against the
+// leech at mid height, two tell-tales a hand's width off the mast, one
+// batten pocket in the upper leech, and a clear window low in the sail
+// just above the foot.  Sizes are metres of cloth.
+const MARK = {
+  color: '#1d4f9e',    // the class drawing's blue
+  letterH: 0.26,       // national letters, cap height
+  numberH: 0.26,       // sail number, figure height
+  gap: 0.07,           // between the two lines
+  numberBase: 0.84,    // baseline of the number above the tack
+  leechInset: 0.12,    // both lines end this far inside the leech
+};
 
-  const grad = g.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, '#fdfdfa');
-  grad.addColorStop(0.55, '#f4f4ee');
-  grad.addColorStop(1, '#e9e9e1');
+/** Batten pocket: fraction up the leech from the clew, and its length. */
+export const BATTENS = [0.68];
+const BATTEN_L = 0.42;
+/** Class insignia: centre (rig frame) and ring radius. */
+export const INSIGNIA = { x: 0.84, y: 2.06, r: 0.085 };
+/** Tell-tales, near the luff: [x, y] of the stitch, rig frame. */
+export const TELLTALES = [[0.22, 1.40], [0.24, 0.82]];
+/** The window: along the foot from x0 to x1, from y0 to y1 above it. */
+export const WINDOW = { x0: 0.34, x1: 1.00, y0: 0.15, y1: 0.31 };
+
+function lerp2(a, b, t) { return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }; }
+
+/** x where the line a-b reaches height y (a, b not level). */
+function xAtY(a, b, y) { return a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y); }
+
+/** Where the ray p + s*d first meets segment a-b, or null. */
+function hitSegment(p, d, a, b) {
+  const ex = b.x - a.x, ey = b.y - a.y;
+  const den = d.x * ey - d.y * ex;
+  if (Math.abs(den) < 1e-9) return null;
+  const s = ((a.x - p.x) * ey - (a.y - p.y) * ex) / den;
+  const u = ((a.x - p.x) * d.y - (a.y - p.y) * d.x) / den;
+  return s > 0 && u >= 0 && u <= 1 ? { x: p.x + d.x * s, y: p.y + d.y * s } : null;
+}
+
+/**
+ * Paint one face of the cloth into the canvas half starting at ox.
+ * `mirror` flips each printed mark about its own centre.
+ */
+function paintFace(g, ox, corners, marks, mirror) {
+  const { tack, head, peak, corner } = corners;
+  const k = TEX_N / TEX_SPAN;               // px per metre
+  const X = (x) => ox + (x - TEX_X0) * k;
+  const Y = (y) => TEX_N - (y - TEX_Y0) * k;
+  const P = (p) => [X(p.x), Y(p.y)];
+
+  g.save();
+  g.beginPath();
+  g.rect(ox, 0, TEX_N, TEX_N);
+  g.clip();
+
+  // cloth: a soft tone change from luff to leech
+  const grad = g.createLinearGradient(X(0), Y(2.4), X(1.9), Y(0));
+  grad.addColorStop(0, '#fdfdfb');
+  grad.addColorStop(0.55, '#f6f6f2');
+  grad.addColorStop(1, '#ecece6');
   g.fillStyle = grad;
-  g.fillRect(0, 0, W, H);
+  g.fillRect(ox, 0, TEX_N, TEX_N);
 
   // woven feel
-  g.globalAlpha = 0.045;
+  g.globalAlpha = 0.04;
   g.strokeStyle = '#7e7e76';
   g.lineWidth = 1;
-  for (let i = 0; i < 130; i++) {
-    g.beginPath();
-    g.moveTo(0, (i / 130) * H);
-    g.lineTo(W, (i / 130) * H + 5);
-    g.stroke();
+  for (let i = 0; i < 160; i++) {
+    const y = (i / 160) * TEX_N;
+    g.beginPath(); g.moveTo(ox, y); g.lineTo(ox + TEX_N, y + 5); g.stroke();
   }
   g.globalAlpha = 1;
 
-  // panel seams, roughly parallel to the foot
-  g.strokeStyle = 'rgba(125,125,116,0.30)';
-  g.lineWidth = 2;
-  for (const v of [0.30, 0.52, 0.74]) {
+  // everything from here is cut to the sail's outline
+  const outline = () => {
     g.beginPath();
-    g.moveTo(W * 0.04, H * (1 - v));
-    g.quadraticCurveTo(W * 0.5, H * (1 - v) - H * 0.05, W * 0.98, H * (1 - v) - H * 0.02);
-    g.stroke();
-  }
-
-  // batten pockets, close to the leech, raked as on a real Opti sail
-  g.strokeStyle = 'rgba(74,74,68,0.50)';
-  g.lineWidth = 10;
-  g.lineCap = 'round';
-  for (const [u0, v0, u1, v1] of [[0.50, 0.60, 0.95, 0.74], [0.44, 0.30, 0.93, 0.46]]) {
-    g.beginPath();
-    g.moveTo(W * u0, H * (1 - v0));
-    g.lineTo(W * u1, H * (1 - v1));
-    g.stroke();
-  }
-  g.lineCap = 'butt';
-
-  // class insignia: the O with its sprit, high on the sail.  The sprit
-  // runs from low at the left up past the top right, as on the class flag.
-  const cx = W * 0.62, cy = H * (1 - 0.80), r = W * 0.072;
-  g.strokeStyle = '#141414';
-  g.lineCap = 'round';
-  g.lineWidth = r * 0.40;
-  g.beginPath();
-  g.arc(cx, cy, r, 0, PI * 2);
-  g.stroke();
-  g.lineWidth = r * 0.26;
-  g.beginPath();
-  g.moveTo(cx - r * 1.35, cy + r * 1.15);
-  g.lineTo(cx + r * 1.15, cy - r * 1.55);
-  g.stroke();
-  g.lineCap = 'butt';
-
-  // Sail marks as the class rules require them: the national letters on
-  // one line and the sail number below, both above the foot and clear of
-  // the sprit and batten pockets.  The cloth's shader mirrors the texture
-  // on the windward face, so both lines read correctly from either side.
-  drawMarkLine(g, W, H, marks.country, MARKS_U, MARKS_COUNTRY_V, 0.088, 0.26, '#1c1c1c');
-  drawMarkLine(g, W, H, marks.number, MARKS_U, MARKS_NUMBER_V, 0.108, 0.30, '#1c1c1c');
-
-  // Tell-tales: short yarn ribbons stitched flat to the cloth, not blobs.
-  // A pair near the luff to read the flow, and one at each batten tip to
-  // read the leech.  They stream aft, so each lies along the chord with a
-  // slight droop.
-  g.fillStyle = '#c62828';
-  for (const [u, v, len] of [
-    [0.13, 0.78, 0.075], [0.15, 0.44, 0.070],
-    [0.86, 0.72, 0.060], [0.83, 0.42, 0.058],
-  ]) {
-    const x0 = W * u, y0 = H * (1 - v);
-    const L = W * len, wdt = Math.max(2, W * 0.0055);
-    g.save();
-    g.translate(x0, y0);
-    g.rotate(0.10);
-    g.beginPath();                       // tapered: stitched, then free end
-    g.moveTo(0, -wdt * 0.55);
-    g.lineTo(L, -wdt * 0.22);
-    g.lineTo(L, wdt * 0.22);
-    g.lineTo(0, wdt * 0.55);
+    for (const p of [tack, corner, peak, head]) g.lineTo(...P(p));
     g.closePath();
-    g.fill();
-    g.fillStyle = 'rgba(60,20,20,0.55)';  // the stitch it is sewn under
-    g.fillRect(-1, -wdt * 0.6, Math.max(2, W * 0.004), wdt * 1.2);
+  };
+  outline();
+  g.clip();
+
+  // leech direction and the inward normal (toward the luff)
+  const lx = peak.x - corner.x, ly = peak.y - corner.y;
+  const ll = Math.hypot(lx, ly);
+  const nx = -ly / ll, ny = lx / ll;
+  const inward = (nx * (tack.x - corner.x) + ny * (tack.y - corner.y)) > 0 ? 1 : -1;
+  const inw = { x: nx * inward, y: ny * inward };
+
+  const seam = (a, b) => {
+    g.beginPath(); g.moveTo(...P(a)); g.lineTo(...P(b)); g.stroke();
+  };
+  const edges = [[tack, head], [head, peak], [tack, corner]];
+  const across = (p) => {               // from p inward to the far edge
+    for (const [a, b] of edges) {
+      const h = hitSegment(p, inw, a, b);
+      if (h) return h;
+    }
+    return { x: p.x + inw.x * 3, y: p.y + inw.y * 3 };
+  };
+
+  // Panels: cross-cut in the upper sail, square to the leech, and a fan
+  // of radial panels from the clew below the lowest cross seam - the clew
+  // takes the sheet load, so the cloth runs out from it.
+  g.strokeStyle = 'rgba(120,120,112,0.30)';
+  g.lineWidth = Math.max(1.5, 0.006 * k);
+  const CROSS = [0.47, 0.60, 0.74, 0.87];
+  for (const f of CROSS) {
+    const p = lerp2(corner, peak, f);
+    seam(p, across(p));
+  }
+  const s0 = across(lerp2(corner, peak, CROSS[0]));   // lowest cross seam
+  const luffTop = Math.min(s0.y, head.y);
+  for (const f of [0.80, 0.62, 0.45, 0.30, 0.16]) {
+    const q = lerp2(tack, head, (luffTop * f) / head.y);
+    seam(corner, q);
+  }
+
+  // corner reinforcement patches, an extra layer of cloth at each corner
+  g.fillStyle = 'rgba(110,110,100,0.06)';
+  g.strokeStyle = 'rgba(120,120,112,0.26)';
+  g.lineWidth = Math.max(1.5, 0.005 * k);
+  for (const [p, r] of [[tack, 0.20], [corner, 0.26], [head, 0.16], [peak, 0.22]]) {
+    g.beginPath(); g.arc(X(p.x), Y(p.y), r * k, 0, PI * 2);
+    g.fill(); g.stroke();
+  }
+
+  // tapes along the luff, head and foot, with the lacing eyelets
+  g.save();
+  outline();
+  g.strokeStyle = 'rgba(95,95,88,0.10)';
+  g.lineWidth = 0.07 * k;               // half of it inside the clip
+  g.stroke();
+  g.restore();
+  g.fillStyle = 'rgba(120,124,130,0.85)';
+  const eyelets = (a, b, step, off) => {
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.round(L / step));
+    const ex = (b.x - a.x) / L, ey = (b.y - a.y) / L;
+    // offset into the sail: the edge normal that points at the clew/tack side
+    let ux = -ey, uy = ex;
+    const mid = lerp2(a, b, 0.5), c = { x: (tack.x + corner.x + peak.x) / 3, y: (tack.y + corner.y + peak.y) / 3 };
+    if ((c.x - mid.x) * ux + (c.y - mid.y) * uy < 0) { ux = -ux; uy = -uy; }
+    for (let i = 1; i < n; i++) {
+      const p = lerp2(a, b, i / n);
+      g.beginPath();
+      g.arc(X(p.x + ux * off), Y(p.y + uy * off), 0.009 * k, 0, PI * 2);
+      g.fill();
+    }
+  };
+  eyelets(tack, head, 0.21, 0.018);
+  eyelets(head, peak, 0.21, 0.018);
+  eyelets(tack, corner, 0.24, 0.018);
+
+  // batten pocket, square to the leech, inward from the leech
+  g.strokeStyle = 'rgba(80,80,74,0.45)';
+  g.lineWidth = 0.03 * k;
+  g.lineCap = 'round';
+  for (const f of BATTENS) {
+    const p = lerp2(corner, peak, f);
+    const a = { x: p.x + inw.x * 0.03, y: p.y + inw.y * 0.03 };
+    seam(a, { x: a.x + inw.x * BATTEN_L, y: a.y + inw.y * BATTEN_L });
+  }
+  g.lineCap = 'butt';
+
+  // The window: a clear PVC panel low in the sail, sewn in with a tape.
+  // It is cut right out of the canvas so the material's alpha shows it.
+  const footY = (x) => tack.y + (corner.y - tack.y) * (x - tack.x) / (corner.x - tack.x);
+  const win = [
+    { x: WINDOW.x0, y: footY(WINDOW.x0) + WINDOW.y0 },
+    { x: WINDOW.x1, y: footY(WINDOW.x1) + WINDOW.y0 },
+    { x: WINDOW.x1, y: footY(WINDOW.x1) + WINDOW.y1 },
+    { x: WINDOW.x0, y: footY(WINDOW.x0) + WINDOW.y1 },
+  ];
+  const winPath = () => {
+    g.beginPath();
+    for (const p of win) g.lineTo(...P(p));
+    g.closePath();
+  };
+  g.save();
+  g.globalCompositeOperation = 'destination-out';
+  winPath(); g.fillStyle = '#000'; g.fill();
+  g.restore();
+  winPath();
+  g.fillStyle = 'rgba(214,228,236,0.30)';
+  g.fill();
+  g.strokeStyle = 'rgba(150,150,142,0.9)';
+  g.lineWidth = 0.016 * k;
+  g.stroke();
+
+  // printed marks, each mirrored about its own centre on the starboard face
+  const printed = (cx, cy, draw) => {
+    g.save();
+    g.translate(X(cx), Y(cy));
+    if (mirror) g.scale(-1, 1);
+    draw();
+    g.restore();
+  };
+
+  // class insignia: the ring with its upright stroke through it, standing
+  // well clear of the ring below
+  const r = INSIGNIA.r * k;
+  printed(INSIGNIA.x, INSIGNIA.y, () => {
+    g.strokeStyle = MARK.color;
+    g.lineWidth = r * 0.30;
+    g.beginPath(); g.arc(0, 0, r, 0, PI * 2); g.stroke();
+    g.lineCap = 'butt';
+    g.lineWidth = r * 0.24;
+    g.beginPath(); g.moveTo(0, -r * 1.22); g.lineTo(0, r * 2.45); g.stroke();
+  });
+
+  // National letters over the sail number, both lines ending a set
+  // distance inside the leech, as in the class drawing - the leech leans
+  // aft lower down, so the number sits a little further aft.
+  const leechX = (y) => xAtY(corner, peak, y);
+  const spritX = (y) => xAtY(corners.snotter, peak, y);
+  const line = (text, base, h) => {
+    if (!text) return;
+    const right = leechX(base + h / 2) - MARK.leechInset;
+    const left = Math.max(0.12, spritX(base + h) + 0.08);
+    markLine(g, printed, text, right, base, h, right - left, k);
+  };
+  const numBase = MARK.numberBase;
+  line(marks.number, numBase, MARK.numberH);
+  line(marks.country, numBase + MARK.numberH + MARK.gap, MARK.letterH);
+
+  // Tell-tales: a red patch on the cloth with a strand of yarn streaming
+  // aft.  Sewn through, so the same on both faces.
+  for (const [x, y] of TELLTALES) {
+    const w = Math.max(2, 0.008 * k), L = 0.17 * k;
+    g.save();
+    g.translate(X(x), Y(y));
+    g.strokeStyle = '#b3261e';
+    g.lineWidth = w;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(0, 0);
+    for (let i = 1; i <= 12; i++) {
+      const s = i / 12;
+      g.lineTo(L * s, Math.sin(s * PI * 2.2) * 0.012 * k * s + s * 0.01 * k);
+    }
+    g.stroke();
+    g.fillStyle = '#c62828';
+    g.beginPath(); g.arc(0, 0, 0.017 * k, 0, PI * 2); g.fill();
     g.restore();
   }
+
+  g.restore();
+}
+
+/**
+ * One line of class lettering: cap height h metres, its right end at x
+ * and its baseline at y, narrowed to fit maxW metres if the text is long.
+ */
+function markLine(g, printed, text, right, y, h, maxW, k) {
+  const px = Math.round((h / 0.72) * k);      // bold sans caps ~0.72 em
+  g.font = `bold ${px}px Arial, Helvetica, sans-serif`;
+  const w = g.measureText(text).width;
+  const sx = Math.min(1, (maxW * k) / w);    // squeeze long numbers sideways
+  const cx = right - (w * sx) / 2 / k;       // centre, so mirroring keeps it in place
+  printed(cx, y, () => {
+    g.scale(sx, 1);
+    g.fillStyle = MARK.color;
+    g.textAlign = 'center';
+    g.textBaseline = 'alphabetic';
+    g.fillText(text, 0, 0);
+  });
+}
+
+export function sailTexture(marks = SAIL_MARKS, corners = rigCorners()) {
+  const c = document.createElement('canvas');
+  c.width = TEX_N * 2; c.height = TEX_N;
+  const g = c.getContext('2d');
+  paintFace(g, 0, corners, marks, false);      // port face
+  paintFace(g, TEX_N, corners, marks, true);   // starboard face
 
   const tex = new THREE.CanvasTexture(c);
   tex.name = 'sail-cloth';
@@ -381,7 +573,7 @@ export function sailTexture(marks = SAIL_MARKS) {
 export function setSailMarks(rig, marks = {}) {
   Object.assign(SAIL_MARKS, marks);
   const old = rig.materials.sailMat.map;
-  rig.materials.sailMat.map = sailTexture(SAIL_MARKS);
+  rig.materials.sailMat.map = sailTexture(SAIL_MARKS, rig.corners);
   rig.materials.sailMat.needsUpdate = true;
   if (old) old.dispose();
 }
@@ -448,10 +640,9 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
   group.add(heel);
 
   // ---- boom -------------------------------------------------------
-  // The foot is laced into the boom, so the boom sits on the foot line and
-  // its windward half shows below the cloth.  The sprit is laced to the
-  // leech on the leeward face - the side the cloth bulges toward - which is
-  // why it reads as a diagonal bar across the sail from that side.
+  // The foot is laced into the boom, so the boom sits on the foot line
+  // and shows below the cloth.  The sprit crosses the starboard face, where it
+  // reads as a diagonal bar across the sail.
   const boom = sparBetween(corners.tack, corners.corner,
     SPEC.boomDia / 2, SPEC.boomDia / 2 * 0.82, carbon, BOOM_Z);
   boom.name = 'Boom';
@@ -464,7 +655,7 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
   pivot.add(boomEnd);
 
   // ---- sprit: from the snotter on the mast up to the peak ---------
-  // it lies across the leeward face of the sail and pushes the peak up
+  // it lies across the starboard face of the sail and pushes the peak up
   const spritTipZ = SPRIT_PEAK_Z;
   const sprit = sparBetween(corners.snotter, corners.spritEnd,
     SPRIT_R0, SPRIT_R1, wood, [SPRIT_HOOK_Z, spritTipZ]);
@@ -479,8 +670,14 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
 
   // ---- sail -------------------------------------------------------
   const sailMat = new THREE.MeshPhysicalMaterial({
-    map: sailTexture(),
+    map: sailTexture(SAIL_MARKS, corners),
     side: THREE.DoubleSide,
+    // the clear window low in the sail is cut out of the texture's alpha
+    transparent: true,
+    // one pass: three.js draws a two-sided transparent material back pass
+    // first with the winding flipped, which swaps gl_FrontFacing and so
+    // the two halves of the texture
+    forceSinglePass: true,
     roughness: 0.9,
     metalness: 0,
     sheen: 0.7,
@@ -488,19 +685,19 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
     sheenColor: new THREE.Color(0xffffff),
   });
 
-  // A class insignia and a sail number are printed to read correctly from
-  // either side, not as a see-through decal.  The cloth is one double-sided
-  // surface whose front face - by the grid's winding - is the windward one.
-  // Seen from ahead of the luff the u axis runs aft-to-fore across the
-  // screen, so it is the front face that needs the texture mirrored; the
-  // leeward face then reads straight off the canvas.
+  // The cloth is one double-sided surface.  Its texture holds both faces
+  // side by side (see sailTexture): the geometry's uv addresses the
+  // port half, and the front face - the starboard one, by the grid's
+  // winding - samples the starboard half instead, where the printed marks are
+  // mirrored so they read correctly from that side.  Seams, battens and
+  // tell-tales are in the same place in both halves.
   sailMat.name = 'sail-cloth';
   sailMat.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `#ifdef USE_MAP
         vec2 sailUv = vMapUv;
-        if ( gl_FrontFacing ) sailUv.x = 1.0 - sailUv.x;
+        if ( gl_FrontFacing ) sailUv.x += 0.5;
         vec4 sampledDiffuseColor = texture2D( map, sailUv );
         diffuseColor *= sampledDiffuseColor;
       #endif`);
@@ -560,6 +757,44 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
   heelFit.position.set(corners.snotter.x + 0.01, corners.snotter.y, SPRIT_HOOK_Z);
   pivot.add(heelFit);
 
+  // ---- masthead wind indicator ------------------------------------
+  // A vane on a short rod above the truck, free to yaw.  Its pointer
+  // (local -X) faces into the apparent wind and the twin tail fins
+  // (local +X) stream downwind; the viewer turns it every frame with
+  // setWindVane().
+  const mastTop = SPEC.luff + SPEC.mastAboveHead;
+  const vaneMat = new THREE.MeshStandardMaterial({ color: 0xd8322a, roughness: 0.5 });
+  vaneMat.name = 'wind-indicator';
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.0025, 0.0025, 0.26, 6), steel);
+  rod.position.y = mastTop + 0.13;
+  group.add(rod);
+  const vane = new THREE.Group();
+  vane.name = 'Wind indicator';
+  vane.position.y = mastTop + 0.25;
+  group.add(vane);
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.34, 6), black);
+  arm.rotation.z = PI / 2;
+  arm.position.x = 0.05;
+  vane.add(arm);
+  const hub = new THREE.Mesh(new THREE.SphereGeometry(0.008, 10, 8), steel);
+  vane.add(hub);
+  const point = new THREE.Mesh(new THREE.ConeGeometry(0.011, 0.04, 10), vaneMat);
+  point.rotation.z = PI / 2;            // tip toward -X
+  point.position.x = -0.13;
+  vane.add(point);
+  const finShape = new THREE.Shape();
+  finShape.moveTo(0, 0); finShape.lineTo(0.09, 0.0);
+  finShape.lineTo(0.09, 0.055); finShape.lineTo(0.03, 0.012); finShape.closePath();
+  const finGeo = new THREE.ShapeGeometry(finShape);
+  const finMat = new THREE.MeshStandardMaterial({ color: 0xd8322a, roughness: 0.5, side: THREE.DoubleSide });
+  finMat.name = 'wind-indicator-fin';
+  for (const s of [-1, 1]) {
+    const fin = new THREE.Mesh(finGeo, finMat);
+    fin.position.set(0.13, 0, 0);
+    fin.rotation.x = s * 0.45;          // the two fins open in a V
+    vane.add(fin);
+  }
+
   // ---- mainsheet line (updated every frame) -----------------------
   const SHEET_PTS = 26;
   const sheetGeo = new THREE.BufferGeometry();
@@ -572,7 +807,7 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
   group.add(sheet);
 
   return {
-    group, pivot, sail, sheet, boom, sprit, block, mast, corners, BOOM_Z,
+    group, pivot, sail, sheet, boom, sprit, block, mast, vane, corners, BOOM_Z,
     materials: { wood, carbon, black, steel, gold, sailMat },
   };
 }
@@ -580,22 +815,33 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
 /**
  * Trim the rig.
  * @param rig    createRig() result
- * @param p      { boomOut 0..1, camber, twist, wind 0..1 }
+ * @param p      { boomDeg, fill, camber, twist, wind, t }
+ *   boomDeg  boom angle off the centreline, degrees: + to starboard (-z),
+ *            - to port (+z), anywhere in -180..180.  (The old `boomOut`
+ *            0..1, eased to port, is still accepted.)
+ *   fill     how the wind fills the cloth, -1..1: the sign is the side it
+ *            bellies to (+ = the pivot's +z, port with the boom amidships),
+ *            the size how full it is.  Near 0 the sail luffs.
+ *   t        time, for the luffing ripple.
  */
 export function updateRig(rig, p = {}) {
-  const { boomOut = 0.35, camber = 1, twist = 1, wind = 0.5 } = p;
+  const { camber = 1, twist = 1, wind = 0.5, fill = 1, t = 0 } = p;
+  const boomDeg = p.boomDeg ?? -(p.boomOut ?? 0.35) * 74;
 
-  // 0 = boom on the centreline, 1 = eased hard over
-  const maxOut = 74 * D2R;
-  rig.pivot.rotation.y = -boomOut * maxOut;
-  rig.boomOut = boomOut;
+  // rotation.y = a swings the boom end (+x) to (cos a, 0, -sin a)
+  rig.pivot.rotation.y = boomDeg * D2R;
+  rig.boomDeg = boomDeg;
+  const eased = Math.min(1, Math.abs(boomDeg) / 74);
+  rig.boomOut = eased;
 
   // Sheet her in and the leech tensions: the middle of the sail
   // deepens and the leech hooks in.  Ease her and the top twists off and
-  // the leech relaxes toward straight.
-  const sheetedIn = 1 - boomOut;
-  const c = camber * (0.55 + 0.45 * sheetedIn) * (0.55 + 0.6 * wind);
-  const tw = twist * (0.45 + 0.75 * boomOut) * (0.6 + 0.7 * wind);
+  // the leech relaxes toward straight.  A sail the wind only half fills
+  // is flatter, and one it does not fill at all shakes.
+  const sheetedIn = 1 - eased;
+  const full = Math.min(1, Math.abs(fill));
+  const c = camber * (0.55 + 0.45 * sheetedIn) * (0.55 + 0.6 * wind) * (0.2 + 0.8 * full);
+  const tw = twist * (0.45 + 0.75 * eased) * (0.6 + 0.7 * wind) * (0.3 + 0.7 * full);
 
   rig.sail.geometry.dispose();
   rig.sail.geometry = sailGeometry(rig.corners, {
@@ -603,6 +849,9 @@ export function updateRig(rig, p = {}) {
     twist: 0.16 * tw,
     hollow: -0.045 - 0.03 * sheetedIn,
     luffSag: 0.035 * (0.4 + 0.9 * wind),
+    side: fill < 0 ? -1 : 1,
+    flutter: (1 - full) * (0.01 + 0.035 * wind),
+    phase: t * 14,
   });
 }
 
@@ -635,4 +884,22 @@ export function updateMainsheet(rig, cleatBoat) {
   }
   attr.needsUpdate = true;
   rig.sheet.geometry.computeBoundingSphere();
+}
+
+const _q = new THREE.Quaternion();
+const _d = new THREE.Vector3();
+
+/**
+ * Turn the masthead wind indicator so its tail streams along `flowWorld`,
+ * the direction the apparent wind blows (world frame).  `t` adds a small
+ * flutter.
+ */
+export function setWindVane(rig, flowWorld, t = 0) {
+  const v = rig.vane;
+  if (!v || !v.parent) return;
+  v.parent.getWorldQuaternion(_q).invert();
+  _d.copy(flowWorld).applyQuaternion(_q);
+  // rotation.y = a maps local +X to (cos a, 0, -sin a)
+  const yaw = Math.atan2(-_d.z, _d.x);
+  v.rotation.y = yaw + 0.05 * Math.sin(t * 7.3) + 0.03 * Math.sin(t * 13.1);
 }

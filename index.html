@@ -33,6 +33,8 @@
     -webkit-backdrop-filter: blur(14px) saturate(1.2);
     box-shadow: 0 10px 34px rgba(0, 0, 0, 0.38);
     user-select: none;
+    max-height: calc(100% - 28px); overflow-y: auto; box-sizing: border-box;
+    scrollbar-width: thin;
   }
   #panel h1 {
     margin: 0 0 2px; font-size: 14px; font-weight: 650; letter-spacing: 0.01em;
@@ -47,10 +49,11 @@
   .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
   .row label { flex: 0 0 74px; color: var(--muted); font-size: 12px; }
   .row output {
-    flex: 0 0 46px; text-align: right; font-variant-numeric: tabular-nums;
+    flex: 0 0 52px; text-align: right; font-variant-numeric: tabular-nums;
     font-size: 11.5px; color: var(--text);
   }
   input[type=range] {
+    min-width: 0;
     flex: 1 1 auto; -webkit-appearance: none; appearance: none;
     height: 20px; background: transparent; cursor: pointer;
   }
@@ -156,8 +159,9 @@
         <div class="ttl">Sail trim</div>
         <div class="row">
           <label for="sheet">Mainsheet</label>
-          <input id="sheet" type="range" min="0" max="100" value="65">
-          <output id="sheetOut">65%</output>
+          <input id="sheet" type="range" min="-180" max="180" step="1" value="-26"
+                 title="Boom angle: 0 on the centreline, + to starboard, - to port">
+          <output id="sheetOut">26&deg; P</output>
         </div>
         <div class="row">
           <label for="wind">Wind</label>
@@ -168,6 +172,18 @@
           <label for="camber">Draft</label>
           <input id="camber" type="range" min="0" max="100" value="55">
           <output id="camberOut">55%</output>
+        </div>
+        <div class="row">
+          <label for="windDir">Wind from</label>
+          <input id="windDir" type="range" min="0" max="359" step="1" value="0"
+                 title="Compass bearing the wind blows from">
+          <output id="windDirOut">000&deg; N</output>
+        </div>
+        <div class="row">
+          <label for="heading">Heading</label>
+          <input id="heading" type="range" min="0" max="359" step="1" value="270"
+                 title="Compass course the bow points to">
+          <output id="headingOut">270&deg; W</output>
         </div>
         <div class="checks">
           <label class="chk"><input id="autoSail" type="checkbox" checked>Auto sail</label>
@@ -202,6 +218,7 @@
           <label class="chk"><input id="labelsChk" type="checkbox">Part labels</label>
           <label class="chk"><input id="wireChk" type="checkbox">Wireframe</label>
           <label class="chk"><input id="waterChk" type="checkbox" checked>Water</label>
+          <label class="chk"><input id="compassChk" type="checkbox" checked>Compass &amp; wind</label>
           <label class="chk"><input id="spinChk" type="checkbox">Turntable</label>
         </div>
       </div>
@@ -215,8 +232,9 @@
       </div>
 
       <div id="hint">
-        <b>Drag the sail</b> sideways to sheet it in and out. Orbit with the left
-        button, zoom with the wheel.
+        <b>Drag the sail</b> to swing the boom to either side, all the way round.
+        Turntable turns the boat's heading. Orbit with the left button, zoom with
+        the wheel.
       </div>
     </div>
   </div>

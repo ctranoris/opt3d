@@ -4,6 +4,20 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-03
 
+- [The boat makes way: moving sea and wake](20261103_1450_boat-makes-way-wake.md) —
+  the sea streams past at her speed; white water in the shader (bow wave,
+  side foam, transom wash, Kelvin arms) scaled by boat speed.
+- [Sail artwork, wind direction, heading, ±180° boom](20261103_1422_sail-artwork-heading-wind-boom-angle.md) —
+  sail redrawn after the class drawing (blue insignia, letters by the leech,
+  tell-tales by the mast, clear window, one batten); wind-from and heading
+  sliders; mainsheet as a −180..180° boom angle with a sail that luffs and
+  backs; turntable fixed; +Z corrected to port.
+
+- [Sail faces, sprit side, bags, dry hull, compass and wind](20261103_1335_sail-sides-sprit-bags-water-wind.md) —
+  marks in proportion and battens/tell-tales correct from both sides;
+  sprit on the port face with a lower snotter; orange bags; sea masked out
+  of the hull; compass rose, north wind arrow and a masthead wind indicator.
+
 - [Sail marks: two editable lines](20261103_1238_sail-marks-two-lines.md) —
   national letters over the sail number (`GRE` / `1062`), changed from the
   panel and repainted live, reading correctly from both sides; this also
