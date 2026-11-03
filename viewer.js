@@ -18,6 +18,8 @@ import {
 import { createCourse } from './race-course.js';
 import { createFleet, FLEET_N } from './fleet.js';
 import { createSailor } from './sailor.js';
+import { createMountains } from './mountains.js';
+import { createSound } from './sound.js';
 
 const D2R = Math.PI / 180;
 const boot = document.getElementById('boot');
@@ -385,7 +387,8 @@ const WATER_FS = /* glsl */`
 
 let renderer, scene, camera, controls, boat, water, sun, pmrem;
 let compass, windArrow, helm;
-let seaFrame, course, fleet, sailor;
+let seaFrame, course, fleet, sailor, mountains;
+const sound = createSound();
 const MID = 1.15;   // midship, boat x: the heading turns about this point
 const state = {
   // Boom angle off the centreline, degrees: + to starboard, - to port.
@@ -479,8 +482,11 @@ function init() {
   // Haze on the marks and the other boats far out, matching the sea's
   // own haze toward the horizon (the water shader does its own).
   scene.fog = new THREE.Fog(HORIZON.clone(), 45, 220);
+  // A few islands far off on the horizon, fixed like the sky.
+  mountains = createMountains({ horizon: HORIZON, sunDir });
+  scene.add(mountains);
 
-  camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.05, 900);
+  camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.05, 1200);
   const c0 = CAMS.quarter;
   camera.position.set(...c0.pos);
 
@@ -721,6 +727,7 @@ function animate() {
   setWindVane(boat.rig, appFlow, t);
   windArrow.userData.update(t, state.wind, state.windFrom, camera);
   controls.update();
+  sound.update(state, dt, camera.position.distanceTo(controls.target));
   renderer.render(scene, camera);
 
   if (state.labels) drawLabels();
@@ -804,6 +811,16 @@ function setCourse(on) {
   course.group.visible = on;
   ui.course.checked = on;
   if (!on) setFleet(false);
+}
+
+function setSound(on) {
+  sound.setEnabled(on);
+  ui.sound.checked = on;
+}
+
+function setMountains(on) {
+  mountains.visible = on;
+  ui.mountains.checked = on;
 }
 
 function setSailor(on) {
@@ -1178,6 +1195,10 @@ function bindUI() {
     compass.visible = windArrow.visible = ui.compass.checked;
   });
 
+  ui.sound = $('soundChk');
+  ui.sound.addEventListener('change', () => setSound(ui.sound.checked));
+  ui.mountains = $('mountainsChk');
+  ui.mountains.addEventListener('change', () => setMountains(ui.mountains.checked));
   ui.sailor = $('sailorChk');
   ui.sailor.addEventListener('change', () => setSailor(ui.sailor.checked));
   ui.course = $('courseChk'); ui.fleet = $('fleetChk');
@@ -1366,6 +1387,10 @@ window.OPTi = {
   get state() { return state; },
   get sailor() { return sailor; },
   setSailor,
+  setMountains,
+  setSound,
+  sound,
+  get mountains() { return mountains; },
   get scene() { return scene; },
   get camera() { return camera; },
   get controls() { return controls; },

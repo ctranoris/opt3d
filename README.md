@@ -241,6 +241,8 @@ seven camera presets.
 | **Turntable** | slowly turns the boat's heading (15°/s); the sail trims itself if Auto sail is on |
 | **Wireframe / Water / Compass & wind** | as they say |
 | **Sailor** | a young sailor in each boat, on the windward side (opposite the boom), hiking harder as she heels; left out of the `.glb` export |
+| **Islands** | four low, hazy islands far off on the horizon (640–820 m away, rising about 1° above it), with open sea between them (`mountains.js`) |
+| **Sound** | recordings from `sounds/` (`sound.js`): water that rises with boat speed, the sail flapping when it luffs, wind in the rig, the mainsheet running when the boom moves, and the sail filling after a tack or gybe; starts on the first click or key press, fades as the camera pulls back |
 | **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys |
 | **Fleet** | four more Optimists (GRE 2471, 3305, 1888, 5120) racing round the marks; turns the course on |
 | **Re-lay course** | lays the course again for the wind and position you have now, and restarts the race |

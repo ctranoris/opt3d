@@ -4,6 +4,21 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-03
 
+- [Lower islands](20261103_1745_lower-islands.md) —
+  island peaks roughly halved, so they sit low on the horizon.
+
+- [Sound from the sounds folder](20261103_1735_sound.md) —
+  water, luffing sail and rig-wind loops driven by the boat, plus mainsheet
+  and sail-filling one-shots; Sound checkbox.
+
+- [Mountains cut down to a few islands](20261103_1715_few-islands.md) —
+  the ring of ranges replaced by four separate hazy islands; checkbox
+  renamed Islands.
+
+- [Distant mountains](20261103_1700_distant-mountains.md) —
+  three hazy ridge lines on the horizon, with gaps of open sea, snow on the
+  far peaks, and a Mountains checkbox.
+
 - [Commit and push: racing, sailors, trapezoid course](20261103_1648_commit-and-push-racing-sailors.md) —
   committed the race course, fleet, sailors and clouds work to main and pushed it.
 
