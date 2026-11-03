@@ -4,6 +4,13 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-03
 
+- [Fleet rounds the marks properly; bigger course](20261103_1915_fleet-rounds-marks.md) —
+  the fleet rounds 1 and 2 outside, goes through the gate round 3S/3P and
+  finishes; the course is about 40% longer.
+
+- [Commit and push: sea and start countdown](20261103_1850_commit-and-push-sea-countdown.md) —
+  pushed fed9daf to main.
+
 - [Start line-up and 10 s countdown](20261103_1845_start-countdown.md) —
   Re-lay course lines every boat up head to wind below the start line
   and counts down 10 s, with horn and beeps, and an OCS rule.

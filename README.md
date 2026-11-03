@@ -293,11 +293,15 @@ about 1.3 s, changing hands on the way. The pose is procedural: the
 pelvis, neck, feet and hands are placed from the side and the hiking, and
 the knees and elbows come from two-bone IK.
 
-The fleet sails the same small model as your boat. Each boat points at
-its next mark, and beats at 60° to the wind (about the best upwind VMG
-for the viewer's speed polar) when the mark is too close to the wind to
-point at. It tacks on the layline, with the odd tack up the middle, and
-keeps going round after the finish. Each boat leaves its own wake, and
+The fleet sails the same small model as your boat. Each boat follows a
+route of waypoints: up the right of mark 1 and round it to port on the
+outside, over the top of mark 2 and round its outside, down through the
+middle of the gate, round 3P (to port) or 3S (to starboard, every other
+boat) below it, then a beat up across the finish line, where it stops
+head to wind. It points at its next waypoint, and beats at 60° to the
+wind (about the best upwind VMG for the viewer's speed polar) when the
+waypoint is too close to the wind to point at. It tacks on the layline,
+with the odd tack up the middle. Each boat leaves its own wake, and
 the sea is masked out of its hull.
 
 The sail responds to the wind: a small model works out the true and

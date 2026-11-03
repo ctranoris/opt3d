@@ -30,7 +30,7 @@ export const polar = (twa) => smoothstep(32, 75, twa) * (1 - 0.12 * smoothstep(1
 // With that polar the best VMG upwind is near 60 deg off the true wind.
 const BEAT = 60;
 const NOGO = BEAT - 2;
-const ROUND = 5;          // metres: close enough to call a mark rounded
+const REACH = 2.5;        // metres: close enough to call a waypoint reached
 const TURN = 30;          // deg/s
 
 const ENTRIES = [
@@ -64,7 +64,7 @@ export function createFleet() {
     return {
       b, holder, marks, sailor,
       w: new THREE.Vector2(), heading: 0, speed: 0, boom: 0, fill: 1, heel: 0,
-      tgt: 0, tack: 0, tackTime: 0, tackAfter: 25, perf: 1, phase: i * 2.3,
+      tgt: 0, gate: 'P', done: false, tack: 0, tackTime: 0, tackAfter: 25, perf: 1, phase: i * 2.3,
     };
   });
 
@@ -90,7 +90,8 @@ export function createFleet() {
           s.heading = (windFromDeg + s.tack * BEAT + 360) % 360;
           s.speed = 0.06; s.boom = 0; s.fill = 1; s.heel = 0;
         }
-        s.tgt = 0; s.tackTime = 0;
+        s.tgt = 0; s.tackTime = 0; s.done = false;
+        s.gate = i % 2 ? 'S' : 'P';      // which gate mark to round
         s.tackAfter = 18 + 22 * Math.random();
         s.perf = 0.86 + 0.14 * Math.random();
       });
@@ -101,18 +102,28 @@ export function createFleet() {
      * water point, `wind` the true wind speed (0..1, x18 = kn).
      */
     update(dt, t, course, windFromDeg, wind, seaH) {
-      const targets = course.targets();
       const a0 = windFromDeg * D2R;
       fl.set(-Math.sin(a0), 0, Math.cos(a0));           // the air moves this way
       for (const s of boats) {
         // ---- the helm ----
-        let tg = targets[s.tgt];
-        if (s.w.distanceTo(tg) < ROUND) { s.tgt = (s.tgt + 1) % targets.length; tg = targets[s.tgt]; }
+        // next waypoint: reached when close, or when sailed past it
+        const route = course.route(s.gate);
+        let tg = route[Math.min(s.tgt, route.length - 1)];
+        if (!s.done) {
+          const from = s.tgt ? route[s.tgt - 1] : null;
+          const d = s.w.distanceTo(tg);
+          const past = from && d < 8 &&
+            (s.w.x - tg.x) * (tg.x - from.x) + (s.w.y - tg.y) * (tg.y - from.y) > 0;
+          if (d < REACH || past) {
+            if (++s.tgt >= route.length) s.done = true;   // across the finish
+            else tg = route[s.tgt];
+          }
+        }
         const brg = Math.atan2(tg.x - s.w.x, -(tg.y - s.w.y)) / D2R;
         const rel = wrap180(brg - windFromDeg);
         let want;
-        if (course.race.phase === 'countdown') {
-          want = windFromDeg;                              // head to wind, waiting for the gun
+        if (course.race.phase === 'countdown' || s.done) {
+          want = windFromDeg;                              // head to wind: waiting for the gun, or finished
         } else if (Math.abs(rel) < NOGO) {
           if (!s.tack) s.tack = rel >= 0 ? 1 : -1;
           s.tackTime += dt;

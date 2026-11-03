@@ -30,19 +30,19 @@ const D2R = Math.PI / 180;
 // upwind, rounded to starboard; 3P on the right, rounded to port), and a
 // short beat up to the finish.
 const PLAN = {
-  startHalf: 12,
+  startHalf: 14,
   startAhead: 6,               // start line this far upwind of the boat
   slots: 5,                    // boats in the row below the line; ours in the middle
   marks: [
-    { label: '1', at: [60, 0] },
-    { label: '2', at: [50, -40] },
-    { label: '3S', at: [2, -49] },
-    { label: '3P', at: [2, -39] },
+    { label: '1', at: [84, 0] },
+    { label: '2', at: [70, -56] },
+    { label: '3S', at: [3, -61] },
+    { label: '3P', at: [3, -51] },
   ],
   // each leg ends at one mark, or at either mark of a gate
   legs: [{ name: '1', marks: [0] }, { name: '2', marks: [1] }, { name: '3', marks: [2, 3], gate: true }],
-  finish: [30, -37],           // middle of the finish line, square to the wind
-  finishHalf: 6,
+  finish: [42, -50],           // middle of the finish line, square to the wind
+  finishHalf: 7,
 };
 export const ROUND_RADIUS = 7;   // pass this close to a mark to round it
 export const COUNTDOWN = 10;     // seconds from laying the course to the gun
@@ -229,6 +229,7 @@ export function createCourse() {
     start: [new THREE.Vector2(), new THREE.Vector2()],
     finish: [new THREE.Vector2(), new THREE.Vector2()],
     finishMid: new THREE.Vector2(),
+    routes: { S: [], P: [] },
     up: new THREE.Vector2(),
     // race state
     // phase: 'countdown' -> 'started' (gun gone, line not yet crossed)
@@ -266,6 +267,24 @@ export function createCourse() {
       fin[1].userData.w.copy(this.finish[1]);
       setLine(startLine, this.start[0], this.start[1]);
       setLine(finishLine, this.finish[0], this.finish[1]);
+      // The fleet's route, as waypoints (up, right of each mark): round 1
+      // and 2 to port on the outside, keeping 3-4 m off, down through the
+      // middle of the gate, round 3P (to port) or 3S (to starboard) below
+      // it, then beat up across the finish.  Every leg out of a mark is a
+      // reach, so no boat has to tack across a mark to make a waypoint.
+      const m = (k, du, dr) => at(PLAN.marks[k].at[0] + du, PLAN.marks[k].at[1] + dr);
+      const g = (du, dr) => at(PLAN.marks[2].at[0] + du,
+        (PLAN.marks[2].at[1] + PLAN.marks[3].at[1]) / 2 + dr);
+      const common = [
+        m(0, 0, 6), m(0, 4, -3),                 // lay the right of 1, bear away over the top
+        m(1, 4, 0), m(1, 3, -3), m(1, 0, -5),    // above 2 and round its outside
+        g(2, 0), g(-3, 0),                       // down through the middle of the gate
+      ];
+      const over = [at(PLAN.finish[0] + 3, PLAN.finish[1])];   // just across the finish
+      this.routes = {
+        P: [...common, m(3, -4, 1), m(3, 0, 5), ...over],     // left turn round 3P
+        S: [...common, m(2, -4, -1), m(2, 0, -5), ...over],   // right turn round 3S
+      };
       this.laid = true;
       this.reset(countdown);
     },
@@ -293,6 +312,9 @@ export function createCourse() {
       const ms = legs[i].marks.map((k) => marks[k].userData.w);
       return ms.length === 1 ? ms[0] : ms[0].clone().add(ms[1]).multiplyScalar(0.5);
     },
+
+    /** The fleet's waypoints round the course, by gate mark ('S' or 'P'). */
+    route(side) { return this.routes[side]; },
 
     /** Water-coordinate targets for a boat going round: each leg's end, then the finish. */
     targets() {
