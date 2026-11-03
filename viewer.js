@@ -7,7 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { SPEC } from './model/opti-core.js';
 import { createBoat, makeMaterials } from './model/opti-boat.js';
-import { updateRig, updateMainsheet } from './model/opti-rig.js';
+import { updateRig, updateMainsheet, setSailMarks } from './model/opti-rig.js';
 
 const D2R = Math.PI / 180;
 const boot = document.getElementById('boot');
@@ -662,6 +662,23 @@ function bindUI() {
   ui.autoSail = $('autoSail'); ui.seaMotion = $('seaMotion');
   ui.labels = $('labelsChk'); ui.wire = $('wireChk');
   ui.water = $('waterChk'); ui.spin = $('spinChk');
+  ui.sailCountry = $('sailCountry'); ui.sailNumber = $('sailNumber');
+
+  // The two lines on the cloth: national letters over the sail number.
+  // Repaint on each keystroke so the sail keeps up with the typing.
+  const applyMarks = () => {
+    setSailMarks(boat.rig, {
+      country: ui.sailCountry.value.toUpperCase().replace(/[^A-Z]/g, ''),
+      number: ui.sailNumber.value.replace(/[^0-9A-Za-z-]/g, ''),
+    });
+  };
+  ui.sailCountry.addEventListener('input', () => {
+    const p = ui.sailCountry.selectionStart;
+    ui.sailCountry.value = ui.sailCountry.value.toUpperCase();
+    ui.sailCountry.setSelectionRange(p, p);
+    applyMarks();
+  });
+  ui.sailNumber.addEventListener('input', applyMarks);
 
   const sync = () => {
     state.sheet = sliderToSheet(+ui.sheet.value);

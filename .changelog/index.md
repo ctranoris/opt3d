@@ -4,6 +4,10 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-03
 
+- [Sail marks: two editable lines](20261103_1238_sail-marks-two-lines.md) —
+  national letters over the sail number (`GRE` / `1062`), changed from the
+  panel and repainted live, reading correctly from both sides; this also
+  fixed the cloth shader's mirror test, which had been backwards.
 - [Untrack build/ and merge to main](20261103_1203_untrack-build-merge-main.md) —
   build output removed from git and ignored; rebuild branch merged into main.
 - [Commit and push](20261103_1158_commit-and-push.md) — added .gitignore,

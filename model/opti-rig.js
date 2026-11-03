@@ -241,7 +241,37 @@ export function sailGeometry(corners, o = {}) {
  * row 0 is the top of the image, i.e. v = 1, the head of the sail.
  * ------------------------------------------------------------------ */
 
-export function sailTexture() {
+/** The printed marks: national letters over the sail number. */
+export const SAIL_MARKS = { country: 'GRE', number: '1062' };
+
+// The block of cloth the two lines live on: forward of the batten pockets
+// and below the sprit's trace, which crosses this part of the sail at
+// about v = 0.65 + 0.45u.  Lines are centred at u = 0.38.
+const MARKS_U = 0.38;
+const MARKS_COUNTRY_V = 0.53;   // baseline of the national letters
+const MARKS_NUMBER_V = 0.385;   // baseline of the sail number
+
+/**
+ * One line of class-style lettering, centred on (u, v) as a baseline,
+ * shrinking the font until it fits within maxW of the cloth's width so a
+ * five-digit number still sits clear of the battens.
+ */
+function drawMarkLine(g, W, H, text, u, v, size, maxW, color) {
+  if (!text) return;
+  let px = Math.round(W * size);
+  g.font = `bold ${px}px -apple-system, system-ui, sans-serif`;
+  const w = g.measureText(text).width;
+  const lim = W * maxW;
+  if (w > lim) {
+    px = Math.max(8, Math.round(px * lim / w));
+    g.font = `bold ${px}px -apple-system, system-ui, sans-serif`;
+  }
+  g.fillStyle = color;
+  g.textAlign = 'center';
+  g.fillText(text, W * u, H * (1 - v));
+}
+
+export function sailTexture(marks = SAIL_MARKS) {
   const W = 640, H = 640;
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
@@ -304,11 +334,12 @@ export function sailTexture() {
   g.stroke();
   g.lineCap = 'butt';
 
-  // sail number
-  g.fillStyle = '#1c1c1c';
-  g.font = `bold ${Math.round(W * 0.115)}px -apple-system, system-ui, sans-serif`;
-  g.textAlign = 'center';
-  g.fillText('1', W * 0.40, H * (1 - 0.55));
+  // Sail marks as the class rules require them: the national letters on
+  // one line and the sail number below, both above the foot and clear of
+  // the sprit and batten pockets.  The cloth's shader mirrors the texture
+  // on the windward face, so both lines read correctly from either side.
+  drawMarkLine(g, W, H, marks.country, MARKS_U, MARKS_COUNTRY_V, 0.088, 0.26, '#1c1c1c');
+  drawMarkLine(g, W, H, marks.number, MARKS_U, MARKS_NUMBER_V, 0.108, 0.30, '#1c1c1c');
 
   // Tell-tales: short yarn ribbons stitched flat to the cloth, not blobs.
   // A pair near the luff to read the flow, and one at each batten tip to
@@ -341,6 +372,18 @@ export function sailTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
   return tex;
+}
+
+/**
+ * Repaint the cloth with different marks.  `marks` may give `country`
+ * and/or `number`; an empty string leaves that line off the sail.
+ */
+export function setSailMarks(rig, marks = {}) {
+  Object.assign(SAIL_MARKS, marks);
+  const old = rig.materials.sailMat.map;
+  rig.materials.sailMat.map = sailTexture(SAIL_MARKS);
+  rig.materials.sailMat.needsUpdate = true;
+  if (old) old.dispose();
 }
 
 /* ------------------------------------------------------------------ *
@@ -447,14 +490,17 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
 
   // A class insignia and a sail number are printed to read correctly from
   // either side, not as a see-through decal.  The cloth is one double-sided
-  // surface, so mirror the texture back across on the rear face.
+  // surface whose front face - by the grid's winding - is the windward one.
+  // Seen from ahead of the luff the u axis runs aft-to-fore across the
+  // screen, so it is the front face that needs the texture mirrored; the
+  // leeward face then reads straight off the canvas.
   sailMat.name = 'sail-cloth';
   sailMat.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `#ifdef USE_MAP
         vec2 sailUv = vMapUv;
-        if ( !gl_FrontFacing ) sailUv.x = 1.0 - sailUv.x;
+        if ( gl_FrontFacing ) sailUv.x = 1.0 - sailUv.x;
         vec4 sampledDiffuseColor = texture2D( map, sailUv );
         diffuseColor *= sampledDiffuseColor;
       #endif`);
