@@ -239,13 +239,13 @@ const heelDeg = () => state.wind * (5 + 13 * (1 - state.sheet));
 // A camera on the leeward quarter looks straight down the chord and sees a
 // thin blade, so the default sits on the windward quarter instead.
 const CAMS = {
-  quarter: { pos: [4.3, 1.95, -3.5], tgt: [1.15, 1.0, 0] },
-  windward: { pos: [2.4, 1.35, -4.5], tgt: [1.15, 0.95, 0] },
-  leeward: { pos: [0.4, 1.3, 4.6], tgt: [1.15, 0.95, 0] },
-  bow: { pos: [-3.9, 1.25, 0.95], tgt: [1.1, 1.0, 0] },
-  stern: { pos: [5.3, 1.5, 0.7], tgt: [1.2, 1.0, 0] },
-  top: { pos: [1.15, 5.6, 0.001], tgt: [1.15, 0, 0] },
-  sail: { pos: [3.1, 1.55, -2.5], tgt: [1.2, 1.35, 0.25] },
+  quarter: { pos: [5.6, 2.4, -4.6], tgt: [1.15, 1.4, 0] },
+  windward: { pos: [2.6, 1.7, -6.0], tgt: [1.15, 1.35, 0] },
+  leeward: { pos: [0.2, 1.6, 6.0], tgt: [1.15, 1.35, 0] },
+  bow: { pos: [-5.2, 1.5, 1.2], tgt: [1.1, 1.3, 0] },
+  stern: { pos: [6.8, 1.9, 0.9], tgt: [1.2, 1.3, 0] },
+  top: { pos: [1.15, 7.5, 0.001], tgt: [1.15, 0, 0] },
+  sail: { pos: [4.0, 2.0, -3.2], tgt: [1.3, 1.8, 0.25] },
 };
 
 function init() {
@@ -287,7 +287,7 @@ function init() {
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 4;
   sun.shadow.camera.far = 30;
-  const s = 2.6;
+  const s = 3.6;
   sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
   sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
   sun.shadow.bias = -0.0007;
@@ -459,25 +459,27 @@ function animate() {
 // thing it names rather than somewhere near it.
 const PARTS = [
   ['Sprit', () => rigPoint('peak', 0.06, 0.05)],
-  ['Sprit tensioner', () => rigPoint('tack', -0.16, -0.12)],
-  ['Mast', () => rigPoint('head', -0.05, 0.30)],
-  ['Luff of sail', () => rigPoint('mid-luff', -0.22, 0.02)],
+  ['Sprit tensioner (snotter)', () => rigPoint('snotter', -0.04, 0)],
+  ['Mast', () => rigPoint('head', -0.01, -0.25)],
+  ['Luff of sail', () => rigPoint('mid-luff', 0.06, 0.25)],
   ['Leech of sail', () => rigPoint('mid-leech', 0.26, 0.10)],
   ['Batten', () => rigPoint('mid-leech', 0.10, -0.16)],
-  ['Foot of sail', () => rigPoint('mid-foot', 0.02, -0.16)],
-  ['Boom', () => rigPoint('mid-foot', 0.0, -0.30)],
-  ['Tack / gooseneck', () => rigPoint('tack', -0.30, -0.02)],
+  ['Foot of sail', () => rigPoint('mid-foot', 0.25, 0.06)],
+  ['Boom', () => rigPoint('mid-foot', -0.35, -0.03)],
+  ['Tack / gooseneck', () => rigPoint('tack', -0.01, 0)],
   ['Optimist insignia', () => rigPoint('mid-sail', 0.30, 0.34)],
-  ['Cockpit', () => boatPoint(1.20, 0.30, 0.0)],
-  ['Side tank / air bag', () => boatPoint(0.95, 0.385, 0.428)],
-  ['Centreboard case', () => boatPoint(0.95, 0.385, 0.085)],
-  ['Centreboard', () => boatPoint(0.95, -0.20, 0.0)],
-  ['Rudder', () => boatPoint(SPEC.loa + 0.07, 0.24, 0.0)],
-  ['Tiller', () => boatPoint(SPEC.loa - 0.28, 0.50, 0.0)],
-  ['Mainsheet cleat', () => boatPoint(1.62, 0.406, 0.435)],
-  ['Hiking strap', () => boatPoint(1.52, 0.395, 0.485)],
-  ['Bow', () => boatPoint(0.03, 0.34, 0.0)],
-  ['Transom', () => boatPoint(SPEC.loa, 0.45, 0.28)],
+  ['Air bag', () => boatPoint(0.85, 0.20, 0.37)],
+  ['Mast thwart', () => boatPoint(0.32, 0.37, -0.25)],
+  ['Centre thwart', () => boatPoint(1.28, 0.35, -0.35)],
+  ['Daggerboard case', () => boatPoint(1.05, 0.35, 0.04)],
+  ['Daggerboard', () => boatPoint(1.10, -0.30, 0.0)],
+  ['Hiking straps', () => boatPoint(1.70, 0.16, 0.12)],
+  ['Mainsheet block', () => boatPoint(1.28, 0.44, 0.0)],
+  ['Stern bag', () => boatPoint(2.19, 0.24, -0.25)],
+  ['Rudder', () => boatPoint(2.58, 0.0, 0.0)],
+  ['Tiller', () => boatPoint(1.95, 0.45, 0.0)],
+  ['Bow transom', () => boatPoint(0.07, 0.26, 0.0)],
+  ['Transom', () => boatPoint(SPEC.loa, 0.30, 0.30)],
 ];
 
 function boatPoint(x, y, z) {
@@ -491,6 +493,7 @@ function rigPoint(which, dx, dy) {
     case 'peak': p = { x: c.peak.x, y: c.peak.y }; break;
     case 'head': p = { x: c.head.x, y: c.head.y }; break;
     case 'tack': p = { x: 0, y: 0 }; break;
+    case 'snotter': p = { x: c.snotter.x, y: c.snotter.y }; break;
     case 'mid-luff': p = { x: c.head.x * 0.5, y: c.head.y * 0.5 }; break;
     case 'mid-foot': p = { x: c.corner.x * 0.5, y: c.corner.y * 0.5 }; break;
     case 'mid-leech': p = { x: (c.peak.x + c.corner.x) / 2, y: (c.peak.y + c.corner.y) / 2 }; break;

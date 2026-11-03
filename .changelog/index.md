@@ -2,6 +2,18 @@
 
 Log of completed actions on the Optimist 3D viewer. Newest first.
 
+## 2026-11-03
+
+- [Accurate model rebuild](20261103_1151_accurate-model-rebuild.md) — clean-slate
+  rebuild as the modern open GRP boat: new hull lines from the SBM plan, thwarts,
+  three bags, V straps, daggerboard case, aluminium spars with snotter sprit,
+  bridle and ratchet mainsheet; sail ≈3.15 m². README updated.
+- [Reference gap analysis](20261103_1126_reference-gap-analysis.md) — compared
+  the model with the new photos and the STL (an accurate plan of the interior).
+  Hull and rig are close; the interior is wrong: modelled as a decked cockpit
+  boat with a ring bag, where a real Opti is open with a mast thwart, centre
+  thwart, three bags and V hiking straps.
+
 ## 2026-10-16
 
 - [README, with every claim checked against the build](20261016_1352_readme.md)

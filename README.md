@@ -11,7 +11,13 @@ shape is driven by numbers that can be checked against the plan. The sail is
 rebuilt from its four corners every time you change the trim, so it sheets in
 and out as real cloth would rather than being a rigid prop that rotates.
 
-LOA 2.30 m · beam 1.13 m · sail area 2.6 m² · sprit rig.
+LOA 2.30 m · beam 1.13 m · sail area ≈3.15 m² · sprit rig · open GRP hull.
+
+The boat is modelled as the modern class boat: an open GRP hull with a rolled
+gunwale, a mast thwart and a centre thwart, two side bags and a stern bag, V
+hiking straps, a daggerboard case, aluminium spars, a snotter-tensioned
+sprit, and a mainsheet run from a boom block through a bridle to a ratchet
+block on the centre thwart.
 
 ---
 
@@ -22,11 +28,12 @@ The page uses ES modules, so it needs a local web server — opening
 folder:
 
 ```bash
-python3 -m http.server 8137
+python3 -m http.server 8137      # or: npx serve -l 8137
 # then open http://127.0.0.1:8137/index.html
 ```
 
-Any static server works (`npx serve`, `php -S`, nginx). There is no build
+Any static server works (`npx serve`, `php -S`, nginx, a ten-line Node
+`http` server where there is no Python). There is no build
 step and no `npm install`: three.js r169 is vendored in `lib/`, so the page
 runs offline with nothing fetched from a CDN.
 
@@ -38,10 +45,10 @@ runs offline with nothing fetched from a CDN.
 
 | file | what it holds |
 |------|---------------|
-| `model/opti-core.js` | `SPEC` — every class dimension in metres — plus the lofting maths (`loft`, `merge`, `fan`, `toGeometry`) and the section tables |
-| `model/opti-hull.js` | the hull shell, decks, coaming, air bags, and the spar/plate/tube primitives |
-| `model/opti-rig.js` | mast, boom, sprit, the sail surface, the sail texture, and the trim solve |
-| `model/opti-boat.js` | assembles everything into one `THREE.Group`, plus materials and the cockpit furniture |
+| `model/opti-core.js` | `SPEC` — every class dimension in metres — the sheer, rocker and half-breadth tables, the section function `halfSection()`, and the lofting maths (`loft`, `merge`, `fan`, `toGeometry`) |
+| `model/opti-hull.js` | the hull shell (outer and inner skins), gunwale, thwarts, daggerboard case, buoyancy bags, floor pads, and the spar/plate/tube/webbing primitives |
+| `model/opti-rig.js` | mast, boom, sprit, snotter, the sail surface, the sail texture, the corner solve, and the mainsheet with bridle and blocks |
+| `model/opti-boat.js` | assembles everything into one `THREE.Group`, plus materials, daggerboard, rudder and tiller, hiking straps and the ratchet block |
 
 The entry point is **`createBoat()`** in `model/opti-boat.js`, which returns
 the boat as a `THREE.Group` ready to add to a scene:
@@ -56,19 +63,15 @@ scene.add(boat.group);
 `updateMainsheet()` re-trim it — see [As a three.js
 module](#as-a-threejs-module).
 
-There is a file called `Opti Model.stl` in this folder. **That is reference
+There is a file called `init_assets/Opti Model.stl`. **That is reference
 input, not the model** — it came with the source material and is not what the
-viewer renders.
-
-`model/opti-geometry.js` is an earlier draft of the lofting, superseded by the
-`opti-core` / `opti-hull` split. Nothing imports it, and it carries its own
-copy of `SPEC` — so if you are editing dimensions, edit `opti-core.js` and not
-that one.
+viewer renders. It was used as a plan of the interior layout (thwart, bag and
+case positions).
 
 ### Getting a mesh file out
 
 Press **Download .glb** in the viewer. That exports the boat as a binary
-glTF 2.0 file (~1.1 MB), upright on its baseline rather than floating and
+glTF 2.0 file (~1.4 MB), upright on its baseline rather than floating and
 heeled.
 
 For scripting, the same export runs headless:
@@ -81,7 +84,10 @@ node .tools/export-glb.mjs eased.glb --sheet 0.85
 ```
 
 Run from the repo root; the script finds puppeteer in `.tools/node_modules`
-and writes the file wherever you point it.
+and writes the file wherever you point it. If puppeteer's bundled browser is
+not installed, point it at a local Chrome with the `CHROME` environment
+variable (`CHROME="C:/Program Files/Google/Chrome/Application/chrome.exe"`);
+`shot.js` honours the same variable.
 
 Note that `--sheet` is the **eased fraction**, not the slider's percentage:
 `0` is the boom on the centreline and `1` is eased hard over, so `--sheet
@@ -97,20 +103,22 @@ viewer's opening trim, 0.35.
 `.glb` is the interchange format here, and it is the one to reach for. What
 survives the trip:
 
-- **Named parts.** 35 of the 71 nodes carry a name, and they are the ones you
-  would look for: `Hull`, `Foredeck`, `Aft tank`, `Side deck (stbd)`,
-  `Cockpit coaming`, `Buoyancy bags`, `Hiking straps (stbd)`, `Centreboard
-  case`, `Centreboard`, `Rudder`, `Rudder pivot`, `Tiller`, `Mainsheet cleat`,
-  `Mast`, `Boom`, `Sprit`, `Sail`, `Mainsheet`, `Rig`. The unnamed 36 are all
-  sub-meshes under one of those — the four bags under `Buoyancy bags`, the
-  three webbing loops under each `Hiking straps`, the panels and lid of the
-  `Centreboard case` — so nothing is orphaned in the outliner.
-- **All 15 materials, named** — `hull`, `ply`, `plyDark`, `black`, `steel`,
-  `bag`, `board`, `rubber`, `spar-wood`, `spar-carbon`, `rig-fitting`,
-  `rig-hardware`, `block-sheave`, `sail-cloth`, `mainsheet-rope`.
-- **Vertex colours** on the hull and the five deck meshes. The hull is one
-  watertight mesh whose colour says white gelcoat outside and plywood inside,
-  so it reads correctly with no textures at all.
+- **Named parts.** 54 of the 67 nodes carry a name, and they are the ones you
+  would look for: `Hull` (with `Hull shell`, `Gunwale`, `Mast thwart`,
+  `Centre thwart`, floor pads, `Mast gate`, `Bow eye`, `Drain bung`),
+  `Daggerboard case`, `Daggerboard`, `Buoyancy bags` (`Side bag (stbd)`,
+  `Side bag (port)`, `Stern bag`), `Hiking straps`, `Rudder`, `Tiller`,
+  `Tiller extension`, `Mainsheet ratchet block`, `Mast step`, and under `Rig`:
+  `Mast`, `Boom`, `Sprit`, `Snotter`, `Gooseneck`, `Sail`, `Mainsheet bridle`,
+  `Boom block`, `Mainsheet`. The unnamed ones are sub-meshes of those, so
+  nothing is orphaned in the outliner.
+- **Named materials** — `hull`, `moulding`, `bag`, `black`, `steel`,
+  `board`, `tab`, `webbing`, `rope`, `tiller`, `gold`, `spar-aluminium`,
+  `rig-fitting`, `rig-hardware`, `block-sheave`, `sail-cloth`,
+  `mainsheet-rope`.
+- **Vertex colours** on the hull, thwarts and bags. The hull is an outer
+  white gelcoat skin plus an inner skin coloured grey on the sides and
+  darker on the floor, so it reads correctly with no textures at all.
 - **One texture**, the sail cloth: class insignia, sail number, panel seams,
   batten pockets and tell-tales.
 - **Double-sided flags**, and clearcoat on the hull and sheen on the cloth,
@@ -173,7 +181,7 @@ scene.add(boat.group);
 // boomOut: 0 = boom on the centreline, 1 = eased hard over
 updateRig(boat.rig, { boomOut: 0.3, camber: 1, wind: 0.5 });
 
-// the mainsheet is a child of the raked rig group, so the cleat - which
+// the mainsheet is a child of the raked rig group, so the ratchet block - which
 // `createBoat` reports in the boat frame - has to be re-expressed in the
 // rig's frame before the line can be strung to it
 boat.group.updateMatrixWorld(true);
@@ -184,7 +192,8 @@ updateMainsheet(boat.rig, boat.cleatLocal.clone().applyMatrix4(toRig));
 `updateRig()` rebuilds the sail geometry for the trim you ask for: camber,
 twist, leech hollow and luff sag all follow from `boomOut` and `wind`, so
 sheeting in deepens the sail and hooks the leech in, and easing lets the top
-twist off. `boat.cleatLocal` is where the mainsheet cleat sits; `boat.rudder`
+twist off. `boat.cleatLocal` is where the mainsheet ratchet block sits, on the
+centre thwart; `boat.rudder`
 and `boat.board` are the two other moving assemblies.
 
 **One thing to know before you copy the folder into a project.** The model
@@ -221,7 +230,7 @@ seven camera presets.
 | **Draft** | how deep the sail is foiled |
 | **Auto sail** | sheets her in and out on its own |
 | **Sea motion** | float her on the waves |
-| **Part labels** | name 20 parts with leader lines |
+| **Part labels** | name 19 parts with leader lines |
 | **Wireframe / Water / Turntable** | as they say |
 
 **Drag the sail sideways** in the viewport to sheet it. Orbit with the left
@@ -238,19 +247,24 @@ angle, how far the boom is eased.
 
 ---
 
-## Reference material in this folder
+## Reference material
 
-What the model was built against:
+What the model was built against, all in `init_assets/`:
 
 - `SBM125-Optimist-OriginalPlanRedrawn-web.jpg` — the redrawn SBM plan; the
-  source of the hull station tables
-- `Parts_of_the_Optimist.png` — parts diagram, used for furniture placement
-- `Optimist_dinghy.png`, `images.jpg`, `aa699154995f7a28d5fbfc6f6e7c7088.jpg`
-  — photographs for reference
+  source of the sheer, rocker and half-breadth tables
+- `Parts_of_the_Optimist.png` — parts diagram, used for naming and rig layout
+- `Optimist_dinghy.png`, `Optimist_dinghy_02.png`, `opte_image_01.jpg`,
+  `images.jpg`, `aa699154995f7a28d5fbfc6f6e7c7088.jpg` — photographs; the
+  plan-view photo set the thwart, bag and strap layout
 - `Opti Model.stl` — reference only, see above
-- `tools/` — the plan images with measurement grids overlaid, used to read
-  offsets off the plan
-- `build/` — rendered screenshots from the verification runs
+
+Elsewhere:
+
+- `tools/` — the plan images with measurement grids overlaid, and the small
+  scripts used to read offsets off the plan and the STL
+- `build/` — rendered screenshots from the verification runs, and
+  `optimist.glb`
 
 ---
 
@@ -282,20 +296,20 @@ entry point.
 
 ## Known limitations
 
-- **The leech figure is unconfirmed.** `SPEC.leech` records 2.59 m ("8'-6"",
-  peak → corner), but the straight-line distance between the two corners the
-  model solves is 1.717 m. The corners themselves check out: the foot measures
-  1.930 m and head→peak 1.220 m, both against `SPEC`, and the peak lands 2.175
-  m above the baseline. So the class figure is almost certainly measured along
-  the cloth with the sprit laced to it rather than straight between corners —
-  but check it against the class rules before treating either number as
-  authoritative.
+- **Rig geometry is solved from four edges.** The sail's corners come from
+  luff 1.68 m, foot 1.93 m (boom level), head→peak 1.22 m and leech 2.67 m.
+  That puts the peak about 3.2 m above the baseline, the sprit at about
+  2.20 m and the area at about 3.15 m². These are read off the class plan
+  and photos, not taken from the measurement rules, so check them against
+  the current class rules before using the model for anything dimensional.
+- **Details still approximate**: the thwarts are plain mouldings with no
+  plywood grain or fastenings, the rudder blade outline is traced from photos,
+  and the aft face of the daggerboard case sits in deep shadow under the
+  centre thwart.
 - **The sail is a parametric approximation**, not a cloth simulation. It
   reads correctly for trim and it flattens where the sprit presses it, but
   there is no flutter, no luffing oscillation, and no interaction with
   apparent wind.
-- **One mainsheet cleat.** Real Optis carry one each side; the model shows
-  the working starboard one.
-- **No foils in the water** — the centreboard and rudder are modelled, but
+- **No foils in the water** — the daggerboard and rudder are modelled, but
   there is no hydrodynamics. The heel and leeway you see are dressed for
   looks from the wind and trim sliders, not solved.
