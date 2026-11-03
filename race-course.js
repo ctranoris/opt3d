@@ -1,0 +1,352 @@
+/**
+ * A race course on the water, after the Optimist Worlds trapezoid
+ * (init_assets/example_course.png): a start line between two flagged
+ * buoys, the windward mark 1 straight upwind of it, mark 2 off to the left
+ * at the end of a reach, a leeward gate 3S / 3P, and a finish line between
+ * two blue flagged buoys upwind of the gate.
+ *
+ *   Start - 1 - 2 - 3S/3P - Finish     (marks rounded to port; the gate
+ *                                       either way round)
+ *
+ * The race is timed: cross the start line going upwind, round 1 and 2,
+ * pass through (or round either mark of) the gate, then beat up and cross
+ * the finish line.
+ *
+ * Everything here lives in water coordinates (x east, z south, metres),
+ * fixed to the sea.  The viewer keeps its own boat in the middle of the
+ * scene and moves the sea past her, so the group that holds the course is
+ * shifted by minus the odometer every frame.
+ */
+
+import * as THREE from 'three';
+
+const D2R = Math.PI / 180;
+
+// Course plan in (upwind, right) metres from the middle of the start line,
+// "right" as seen looking upwind.  A beat to the windward mark 1, a reach
+// left to 2, a run down to the leeward gate 3S / 3P (3S on the left looking
+// upwind, rounded to starboard; 3P on the right, rounded to port), and a
+// short beat up to the finish.
+const PLAN = {
+  startHalf: 12,
+  startAhead: 12,              // start line this far upwind of the boat
+  marks: [
+    { label: '1', at: [60, 0] },
+    { label: '2', at: [50, -40] },
+    { label: '3S', at: [2, -49] },
+    { label: '3P', at: [2, -39] },
+  ],
+  // each leg ends at one mark, or at either mark of a gate
+  legs: [{ name: '1', marks: [0] }, { name: '2', marks: [1] }, { name: '3', marks: [2, 3], gate: true }],
+  finish: [30, -37],           // middle of the finish line, square to the wind
+  finishHalf: 6,
+};
+export const ROUND_RADIUS = 7;   // pass this close to a mark to round it
+
+const MARK_COL = 0xd8231b;
+const START_COL = 0xff6a1a;
+const FINISH_COL = 0x1f5fd6;
+
+/* ------------------------------------------------------------------ *
+ * pieces
+ * ------------------------------------------------------------------ */
+
+/** Red inflatable mark with its number round the sides. */
+function numberTexture(n) {
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#d8231b';
+  g.fillRect(0, 0, cv.width, cv.height);
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, cv.width, 22);
+  g.font = `bold ${String(n).length > 1 ? 140 : 170}px Arial, Helvetica, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  // four times round, so it reads from any side
+  for (let k = 0; k < 4; k++) g.fillText(String(n), (k + 0.5) * cv.width / 4, 145);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+function turningMark(n) {
+  const g = new THREE.Group();
+  g.name = `Mark ${n}`;
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.46, 0.55, 1.6, 40, 1, true),
+    new THREE.MeshStandardMaterial({
+      map: numberTexture(n), roughness: 0.55, side: THREE.DoubleSide,
+      // a touch of glow, so a mark against the light still reads as red
+      emissive: 0xffffff, emissiveMap: null, emissiveIntensity: 0.0,
+    }));
+  body.material.emissiveMap = body.material.map;
+  body.material.emissiveIntensity = 0.22;
+  body.position.y = 0.55;
+  const top = new THREE.Mesh(
+    new THREE.SphereGeometry(0.46, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: MARK_COL, roughness: 0.55, emissive: MARK_COL, emissiveIntensity: 0.18 }));
+  top.scale.y = 0.35;
+  top.position.y = 1.35;
+  g.add(body, top);
+  body.castShadow = top.castShadow = true;
+  return g;
+}
+
+/** A flag on a staff; the cloth is animated in `waveFlag`. */
+function flag(color, w = 0.8, h = 0.5) {
+  const geo = new THREE.PlaneGeometry(w, h, 12, 4);
+  geo.translate(w / 2, -h / 2, 0);
+  geo.userData.base = geo.attributes.position.array.slice();
+  geo.userData.w = w;
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    color, roughness: 0.7, side: THREE.DoubleSide, emissive: color, emissiveIntensity: 0.15,
+  }));
+  m.name = 'Flag';
+  return m;
+}
+
+function waveFlag(m, t, wind, phase) {
+  const geo = m.geometry, base = geo.userData.base, W = geo.userData.w;
+  const arr = geo.attributes.position.array;
+  const amp = 0.03 + 0.06 * wind;
+  const f = 6 + 8 * wind;
+  for (let i = 0; i < arr.length; i += 3) {
+    const x = base[i], y = base[i + 1];
+    const k = x / W;
+    arr[i + 2] = Math.sin(x * 9 - t * f + phase) * amp * k + Math.sin(y * 7 + t * 3) * 0.01 * k;
+    // a light breeze lets the fly droop
+    arr[i + 1] = y - (1 - Math.min(1, wind * 2.2)) * 0.25 * k * k;
+  }
+  geo.attributes.position.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
+/** Buoy with a staff and a flag: the ends of the start and finish lines. */
+function flagBuoy(color, name) {
+  const g = new THREE.Group();
+  g.name = name;
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, emissive: color, emissiveIntensity: 0.15 });
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.42, 28, 18), mat);
+  ball.scale.y = 0.85;
+  ball.position.y = 0.12;
+  const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, 2.6, 10),
+    new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.4, metalness: 0.3 }));
+  staff.position.y = 1.55;
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), mat);
+  knob.position.y = 2.88;
+  const fl = flag(color);
+  const fly = new THREE.Group();     // turns the flag to stream downwind
+  fly.position.y = 2.82;
+  fly.add(fl);
+  g.add(ball, staff, knob, fly);
+  ball.castShadow = staff.castShadow = fl.castShadow = true;
+  g.userData.fly = fly;
+  g.userData.flag = fl;
+  return g;
+}
+
+function dashedLine(color) {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(1, 0, 0)]);
+  const line = new THREE.Line(geo, new THREE.LineDashedMaterial({
+    color, dashSize: 0.9, gapSize: 0.7, transparent: true, opacity: 0.75,
+  }));
+  line.renderOrder = 1;
+  return line;
+}
+
+function setLine(line, a, b, y = 0.09) {
+  const p = line.geometry.attributes.position.array;
+  p[0] = a.x; p[1] = y; p[2] = a.y;
+  p[3] = b.x; p[4] = y; p[5] = b.y;
+  line.geometry.attributes.position.needsUpdate = true;
+  line.geometry.computeBoundingSphere();
+  line.computeLineDistances();
+}
+
+/* ------------------------------------------------------------------ *
+ * geometry helpers (2D, water coordinates)
+ * ------------------------------------------------------------------ */
+
+const cross2 = (ax, ay, bx, by) => ax * by - ay * bx;
+
+/** Did the move p0 -> p1 cross the segment a-b?  Returns the side it came from, or 0. */
+function crossing(p0, p1, a, b) {
+  const rx = p1.x - p0.x, ry = p1.y - p0.y;
+  const sx = b.x - a.x, sy = b.y - a.y;
+  const den = cross2(rx, ry, sx, sy);
+  if (Math.abs(den) < 1e-9) return 0;
+  const qx = a.x - p0.x, qy = a.y - p0.y;
+  const t = cross2(qx, qy, sx, sy) / den;
+  const u = cross2(qx, qy, rx, ry) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? Math.sign(den) || 1 : 0;
+}
+
+/** Compass bearing of a water-coordinate vector (north = -z). */
+export const bearing2 = (dx, dz) => ((Math.atan2(dx, -dz) / D2R) + 360) % 360;
+
+/* ------------------------------------------------------------------ *
+ * the course
+ * ------------------------------------------------------------------ */
+
+export function createCourse() {
+  const group = new THREE.Group();
+  group.name = 'Race course';
+
+  const pin = flagBuoy(START_COL, 'Start pin');
+  const committee = flagBuoy(START_COL, 'Start committee end');
+  const marks = PLAN.marks.map((m) => turningMark(m.label));
+  const legs = PLAN.legs;
+  const fin = [flagBuoy(FINISH_COL, 'Finish (left)'), flagBuoy(FINISH_COL, 'Finish (right)')];
+  const startLine = dashedLine(0xffffff);
+  const finishLine = dashedLine(0x6fa8ff);
+  group.add(pin, committee, ...marks, ...fin, startLine, finishLine);
+
+  // a pulsing ring on the water round the next mark (two for the gate)
+  const ringGeo = new THREE.RingGeometry(2.0, 2.35, 64);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0x4cff9a, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide });
+  const rings = [0, 1].map(() => {
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.renderOrder = 2;
+    group.add(ring);
+    return ring;
+  });
+
+  const buoys = [pin, committee, ...marks, ...fin];
+  const flagBuoys = [pin, committee, ...fin];
+  buoys.forEach((b, i) => { b.userData.w = new THREE.Vector2(); b.userData.phase = i * 1.7; });
+
+  const course = {
+    group, marks, legs, pin, committee, fin, buoys,
+    laid: false,
+    // water coordinates of the course features
+    start: [new THREE.Vector2(), new THREE.Vector2()],
+    finish: [new THREE.Vector2(), new THREE.Vector2()],
+    finishMid: new THREE.Vector2(),
+    up: new THREE.Vector2(),
+    // race state
+    race: { phase: 'pre', next: 0, time: 0, best: null },
+    _prev: null,
+
+    /**
+     * Lay the course for the wind, ahead of `p0` (the boat's position in
+     * water coordinates), and reset the race.
+     */
+    layout(p0, windFromDeg) {
+      const a = windFromDeg * D2R;
+      const u = new THREE.Vector2(Math.sin(a), -Math.cos(a));   // upwind
+      const r = new THREE.Vector2(Math.cos(a), Math.sin(a));    // right, looking upwind
+      const at = (du, dr) => new THREE.Vector2(
+        S.x + u.x * du + r.x * dr, S.y + u.y * du + r.y * dr);
+      const S = p0.clone().addScaledVector(u, PLAN.startAhead);
+      this.up.copy(u);
+      this.start[0].copy(at(0, -PLAN.startHalf));
+      this.start[1].copy(at(0, PLAN.startHalf));
+      pin.userData.w.copy(this.start[0]);
+      committee.userData.w.copy(this.start[1]);
+      PLAN.marks.forEach((m, i) => marks[i].userData.w.copy(at(...m.at)));
+      // the finish line square to the wind: the last leg is a beat
+      const F = at(...PLAN.finish);
+      const across = r.clone().multiplyScalar(PLAN.finishHalf);
+      this.finishMid.copy(F);
+      this.finish[0].copy(F).sub(across);
+      this.finish[1].copy(F).add(across);
+      fin[0].userData.w.copy(this.finish[0]);
+      fin[1].userData.w.copy(this.finish[1]);
+      setLine(startLine, this.start[0], this.start[1]);
+      setLine(finishLine, this.finish[0], this.finish[1]);
+      this.laid = true;
+      this.reset();
+    },
+
+    reset() {
+      this.race.phase = 'pre';
+      this.race.next = 0;
+      this.race.time = 0;
+      this._prev = null;
+    },
+
+    /** Where a leg ends: the mark, or the middle of a gate. */
+    legPoint(i) {
+      const ms = legs[i].marks.map((k) => marks[k].userData.w);
+      return ms.length === 1 ? ms[0] : ms[0].clone().add(ms[1]).multiplyScalar(0.5);
+    },
+
+    /** Water-coordinate targets for a boat going round: each leg's end, then the finish. */
+    targets() {
+      return [...legs.map((_, i) => this.legPoint(i)), this.finishMid];
+    },
+
+    /**
+     * Per frame.  `seaH(x, z)` is the sea height at a water point; `flow`
+     * the world direction the true wind blows; `boatW` our boat's water
+     * position.  Returns what the HUD needs.
+     */
+    update(dt, t, seaH, flow, wind, boatW) {
+      const yaw = Math.atan2(-flow.z, flow.x);
+      for (const b of buoys) {
+        const w = b.userData.w;
+        const h = seaH(w.x, w.y);
+        // the buoy rides the swell and rocks with it
+        b.position.set(w.x, h - 0.22, w.y);
+        const hx = seaH(w.x + 0.5, w.y) - h, hz = seaH(w.x, w.y + 0.5) - h;
+        b.rotation.set(hz * 1.6, 0, -hx * 1.6);
+      }
+      for (const b of flagBuoys) {
+        b.userData.fly.rotation.y = yaw - b.rotation.y;
+        waveFlag(b.userData.flag, t, wind, b.userData.phase);
+      }
+
+      // ---- the race ----
+      const R = this.race;
+      const p1 = boatW.clone();
+      const p0 = this._prev || p1;
+      this._prev = p1;
+      if (R.phase === 'pre') {
+        // across the line going upwind starts the clock
+        const s = crossing(p0, p1, this.start[0], this.start[1]);
+        if (s && p1.clone().sub(p0).dot(this.up) > 0) { R.phase = 'racing'; R.next = 0; R.time = 0; }
+      } else if (R.phase === 'racing') {
+        R.time += dt;
+        if (R.next < legs.length) {
+          const leg = legs[R.next];
+          const ms = leg.marks.map((k) => marks[k].userData.w);
+          // round the mark (either gate mark), or sail through the gate
+          if (ms.some((w) => p1.distanceTo(w) < ROUND_RADIUS) ||
+              (leg.gate && crossing(p0, p1, ms[0], ms[1]))) R.next++;
+        } else if (crossing(p0, p1, this.finish[0], this.finish[1])) {
+          R.phase = 'done';
+          if (R.best == null || R.time < R.best) R.best = R.time;
+        }
+      }
+
+      // where to go next, and the ring that shows it
+      let goal;
+      if (R.phase === 'pre') goal = this.start[0].clone().add(this.start[1]).multiplyScalar(0.5);
+      else if (R.phase === 'racing') goal = R.next < legs.length ? this.legPoint(R.next) : this.finishMid;
+      else goal = null;
+      const lit = R.phase === 'racing' && R.next < legs.length ? legs[R.next].marks : [];
+      const k = 1 + 0.12 * Math.sin(t * 4);
+      ringMat.opacity = 0.45 + 0.25 * Math.sin(t * 4);
+      rings.forEach((ring, i) => {
+        ring.visible = i < lit.length;
+        if (!ring.visible) return;
+        const w = marks[lit[i]].userData.w;
+        ring.position.set(w.x, seaH(w.x, w.y) + 0.06, w.y);
+        ring.scale.set(k, k, k);
+      });
+      let dist = 0, brg = 0;
+      if (goal) {
+        dist = goal.distanceTo(p1);
+        brg = bearing2(goal.x - p1.x, goal.y - p1.y);
+      }
+      const label = R.next < legs.length
+        ? (legs[R.next].gate ? `Gate ${legs[R.next].marks.map((i) => PLAN.marks[i].label).join(' / ')}` : `Mark ${legs[R.next].name}`)
+        : 'Finish';
+      return { phase: R.phase, next: R.next, legs: legs.map((l) => l.name), label, time: R.time, best: R.best, dist, brg };
+    },
+  };
+  return course;
+}

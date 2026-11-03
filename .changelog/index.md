@@ -4,6 +4,28 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-03
 
+- [Commit and push: racing, sailors, trapezoid course](20261103_1648_commit-and-push-racing-sailors.md) —
+  committed the race course, fleet, sailors and clouds work to main and pushed it.
+
+- [Optimist Worlds trapezoid course, all-GRE fleet](20261103_1640_trapezoid-course-gre-fleet.md) —
+  course redone after the Worlds example: Start – 1 (windward) – 2 –
+  3S/3P gate – Finish, red marks, four buoys instead of five; the fleet
+  sails all show GRE.
+
+- [Sailors in the boats](20261103_1611_sailors-in-the-boats.md) —
+  a young sailor in each boat on the windward side, opposite the boom;
+  hikes with the heel, ducks across in tacks and gybes, aft hand on a
+  swivelling tiller extension, forward hand on the mainsheet.
+
+- [Race course, fleet, clouds and keyboard steering](20261103_1550_race-course-fleet-clouds.md) —
+  optional course (start line with two orange flags, marks 1–5, blue
+  flagged finish) with a timed race and HUD; optional fleet of four AI
+  Optimists racing round it, each with its own wake; cumulus clouds;
+  ← / → steering; the sky texture, upside down until now, fixed.
+
+- [Commit and push: sailing simulation](20261103_1458_commit-and-push-sailing-sim.md) —
+  committed and pushed the day's sailing, wake and sail-artwork work to main (`0ba3fc0`).
+
 - [The boat makes way: moving sea and wake](20261103_1450_boat-makes-way-wake.md) —
   the sea streams past at her speed; white water in the shader (bow wave,
   side foam, transom wash, Kelvin arms) scaled by boat speed.

@@ -199,6 +199,9 @@ function hikingStraps(M) {
   return g;
 }
 
+/** Tiller extension length, joint to grip. */
+export const EXTENSION = 0.60;
+
 function rudderAssembly(M) {
   const g = new THREE.Group();
   g.name = 'Rudder';
@@ -241,18 +244,29 @@ function rudderAssembly(M) {
   const joint = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 10), M.black);
   joint.position.set(tFwd, tY, 0);
   tiller.add(joint);
-  const ext = new THREE.Mesh(tubeGeometry([
-    [tFwd, tY, 0], [tFwd - 0.16, tY - 0.01, 0.015], [1.45 - px, tY - 0.03, 0.03],
-  ], 0.008, 10), M.black);
-  ext.name = 'Tiller extension';
-  tiller.add(ext);
+  // The extension swivels on a universal joint at the tiller's fore end.
+  // It is built along -x from that joint, so pointing it is one rotation;
+  // the sailor's aft hand aims it (see sailor.js), and at rest it lies
+  // forward on the centre thwart.
+  const extension = new THREE.Group();
+  extension.name = 'Tiller extension';
+  extension.position.set(tFwd, tY, 0);
+  const ext = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, EXTENSION, 10)
+    .rotateZ(Math.PI / 2).translate(-EXTENSION / 2, 0, 0), M.black);
+  ext.name = 'Tiller extension tube';
+  ext.castShadow = true;
+  extension.add(ext);
   const grip = new THREE.Mesh(new THREE.SphereGeometry(0.016, 12, 10), M.black);
-  grip.position.set(1.45 - px, tY - 0.03, 0.03);
-  tiller.add(grip);
+  grip.position.set(-EXTENSION, 0, 0);
+  extension.add(grip);
+  extension.userData.rest = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(-1, 0, 0), new THREE.Vector3(-1, -0.13, 0.02).normalize());
+  extension.quaternion.copy(extension.userData.rest);
+  tiller.add(extension);
   pivot.add(tiller);
   g.add(pivot);
 
-  return { group: g, pivot, tiller };
+  return { group: g, pivot, tiller, extension };
 }
 
 function mastStep(M, frame) {

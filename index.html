@@ -124,6 +124,25 @@
   }
   #readout b { color: #fff; font-weight: 600; }
 
+  /* ---------- race HUD ---------- */
+  #race {
+    display: none; position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--panel-line); border-radius: 12px;
+    padding: 8px 16px 9px; text-align: center; pointer-events: none;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  #race .big { font-size: 15px; font-weight: 650; color: var(--text); margin-bottom: 2px; }
+  #race b { color: var(--text); font-weight: 600; }
+  #race .legs { margin-top: 6px; display: flex; gap: 5px; justify-content: center; }
+  #race .legs span {
+    width: 20px; height: 20px; line-height: 20px; border-radius: 50%; font-size: 11px;
+    background: rgba(255, 255, 255, 0.08); color: var(--muted);
+  }
+  #race .legs span.done { background: rgba(244, 194, 13, 0.85); color: #14110a; }
+  #race .legs span.cur { background: #4cff9a; color: #04131d; font-weight: 700; }
+  @media (max-width: 640px) { #race { top: auto; bottom: 70px; } }
+
   /* ---------- boot / error ---------- */
   #boot {
     position: absolute; inset: 0; display: grid; place-items: center;
@@ -220,6 +239,18 @@
           <label class="chk"><input id="waterChk" type="checkbox" checked>Water</label>
           <label class="chk"><input id="compassChk" type="checkbox" checked>Compass &amp; wind</label>
           <label class="chk"><input id="spinChk" type="checkbox">Turntable</label>
+          <label class="chk"><input id="sailorChk" type="checkbox" checked>Sailor</label>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="ttl">Race</div>
+        <div class="checks">
+          <label class="chk"><input id="courseChk" type="checkbox">Race course</label>
+          <label class="chk"><input id="fleetChk" type="checkbox">Fleet</label>
+        </div>
+        <div class="btns" style="margin-top:8px">
+          <button id="relay" title="Lay the course for the present wind, just upwind of the boat, and restart the race">Re-lay course</button>
         </div>
       </div>
 
@@ -233,13 +264,14 @@
 
       <div id="hint">
         <b>Drag the sail</b> to swing the boom to either side, all the way round.
-        Turntable turns the boat's heading. Orbit with the left button, zoom with
-        the wheel.
+        Turntable turns the boat's heading. <b>&larr; / &rarr;</b> (or A / D) steer.
+        Orbit with the left button, zoom with the wheel.
       </div>
     </div>
   </div>
 
   <div id="readout"></div>
+  <div id="race"></div>
 
   <div id="boot">
     <div class="card">

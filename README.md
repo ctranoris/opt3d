@@ -220,7 +220,8 @@ through a Blender round trip.
 
 ## The viewer
 
-`index.html` + `viewer.js`. Beyond the boat: a procedural sky feeding
+`index.html` + `viewer.js`, with `race-course.js` and `fleet.js` for the
+racing and `sailor.js` for the crew. Beyond the boat: a procedural sky with fair-weather cumulus feeding
 image-based lighting, a custom shader sea (four summed sine waves with
 analytic normals, fresnel, sun glitter, distance haze), soft shadows, and
 seven camera presets.
@@ -239,9 +240,56 @@ seven camera presets.
 | **Part labels** | name 25 parts with leader lines |
 | **Turntable** | slowly turns the boat's heading (15°/s); the sail trims itself if Auto sail is on |
 | **Wireframe / Water / Compass & wind** | as they say |
+| **Sailor** | a young sailor in each boat, on the windward side (opposite the boom), hiking harder as she heels; left out of the `.glb` export |
+| **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys |
+| **Fleet** | four more Optimists (GRE 2471, 3305, 1888, 5120) racing round the marks; turns the course on |
+| **Re-lay course** | lays the course again for the wind and position you have now, and restarts the race |
+| **← / → or A / D** | steer: turns the bow at 40°/s, and the camera swings round with her |
 
 **Drag the sail** in the viewport to swing the boom to any angle on either
 side. Orbit with the left button, zoom with the wheel.
+
+**Racing.** With the course laid, steer with the arrow keys (Auto sail
+trims for you). Cross the start line going upwind to start the clock, then
+sail Start – 1 – 2 – 3S/3P – Finish, the rounding order of the Optimist
+Worlds course (`init_assets/example_course.png`):
+
+- beat to the windward mark 1;
+- reach left to 2;
+- run down to the leeward gate, and go through it or round either 3S or 3P;
+- beat up to the finish.
+
+A mark counts once you pass within 7 m of it; the next one (both, for the
+gate) has a pulsing green ring. The panel at the top shows the next mark, its
+distance and bearing, the elapsed time and your best time. The course
+(start 12 m upwind of the boat):
+
+| | metres upwind of the start | metres right (looking upwind) |
+|---|---|---|
+| Mark 1 (windward) | 60 | 0 |
+| Mark 2 | 50 | −40 |
+| Gate 3S | 2 | −49 |
+| Gate 3P | 2 | −39 |
+| Finish (middle, 12 m long) | 30 | −37, square to the wind |
+
+**The sailor** sits on the side deck opposite the boom: boom to starboard
+puts them on the port side, boom to port on the starboard side. While the
+boom is within 4° of the centreline they stay where they are. They face
+inboard and a little forward, feet hooked under the hiking strap, the aft
+hand on the tiller extension (which swivels to follow it) and the forward
+hand on the mainsheet tail coming out of the ratchet block. As the heel
+builds they hike out, leaning back over the water. When the boom crosses
+in a tack or gybe they duck low across the cockpit to the new side in
+about 1.3 s, changing hands on the way. The pose is procedural: the
+pelvis, neck, feet and hands are placed from the side and the hiking, and
+the knees and elbows come from two-bone IK.
+
+The fleet sails the same small model as your boat. Each boat points at
+its next mark, and beats at 60° to the wind (about the best upwind VMG
+for the viewer's speed polar) when the mark is too close to the wind to
+point at. It tacks on the layline, with the odd tack up the middle, and
+keeps going round after the finish. Each boat leaves its own wake, and
+the sea is masked out of its hull.
 
 The sail responds to the wind: a small model works out the true and
 apparent wind angles from the course, fills the cloth on the side the wind

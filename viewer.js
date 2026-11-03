@@ -15,6 +15,9 @@ import {
   HULL_N, HULL_STEP, hullTable, createCompass, createWindArrow, placeWindArrow,
   windFlow, WIND_FROM_DEG,
 } from './scene-extras.js';
+import { createCourse } from './race-course.js';
+import { createFleet, FLEET_N } from './fleet.js';
+import { createSailor } from './sailor.js';
 
 const D2R = Math.PI / 180;
 const boot = document.getElementById('boot');
@@ -65,6 +68,59 @@ function skyColor(dir) {
   return c;
 }
 
+/* Fair-weather cumulus, painted into the sky texture (and so into the
+ * image-based lighting too).  2D value noise on the cloud deck: a ray up
+ * through the sky meets a flat layer, so the clouds shrink and crowd
+ * toward the horizon the way real ones do. */
+function hash2(x, y) {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+function vnoise2(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  let fx = x - ix, fy = y - iy;
+  fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix, iy), b = hash2(ix + 1, iy), c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+  return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy;
+}
+function fbm2(x, y) {
+  let v = 0, amp = 0.5;
+  for (let o = 0; o < 5; o++) {
+    v += amp * vnoise2(x, y);
+    x = x * 2.03 + 17.1; y = y * 2.03 - 9.3; amp *= 0.5;
+  }
+  return v;
+}
+const CLOUD_LIT = new THREE.Color(1.0, 0.99, 0.96);
+const CLOUD_BASE = new THREE.Color(0.56, 0.62, 0.70);
+
+/** Cloud cover over a sky colour `c` for direction `dir` (modifies c). */
+function addClouds(c, dir) {
+  if (dir.y <= 0.015) return c;
+  // where the ray meets the cloud deck
+  const k = 1 / (dir.y + 0.06);
+  const px = dir.x * k * 2.4, pz = dir.z * k * 2.4;
+  const n = fbm2(px + 3.7, pz - 1.3);
+  // puffy cells: a big-scale mask so there is open sky between groups
+  const mask = vnoise2(px * 0.35 + 11.0, pz * 0.35 - 4.0);
+  const cover = 0.50 + 0.18 * (1 - mask);
+  let d = Math.min(1, Math.max(0, (n - cover) / 0.16));
+  if (d <= 0) return c;
+  d = d * d * (3 - 2 * d);
+  // lit from the sun's side: denser toward the sun means more shadow here
+  const s = 0.35;
+  const nS = fbm2(px + 3.7 + sunDir.x * s, pz - 1.3 + sunDir.z * s);
+  const light = Math.min(1, Math.max(0, 0.62 + (n - nS) * 4.0 + 0.25 * (1 - d)));
+  const col = CLOUD_BASE.clone().lerp(CLOUD_LIT, light);
+  // a bright rim where the cloud is thin toward the sun
+  const sd = Math.max(0, dir.dot(sunDir));
+  col.lerp(SUN_TINT, Math.pow(sd, 6) * 0.5 * (1 - d));
+  // far clouds melt into the haze above the horizon
+  const far = Math.pow(1 - Math.min(1, dir.y / 0.35), 2.2);
+  col.lerp(HORIZON, far * 0.75);
+  return c.lerp(col, d * (1 - Math.pow(1 - Math.min(1, dir.y / 0.06), 2)) * 0.95);
+}
+
 function skyTexture() {
   const W = 1024, H = 512;
   const cv = document.createElement('canvas');
@@ -72,12 +128,15 @@ function skyTexture() {
   const g = cv.getContext('2d');
   const img = g.createImageData(W, H);
   const dir = new THREE.Vector3();
+  // three.js samples an equirect map at u = atan2(z, x) / 2pi + 0.5 and
+  // v = asin(y) / pi + 0.5, and a canvas texture is flipped so its top
+  // row is v = 1: the top row is straight up, the middle column is -x.
   for (let j = 0; j < H; j++) {
-    const phi = (j / (H - 1) - 0.5) * Math.PI;      // +up .. -down
+    const phi = (0.5 - j / (H - 1)) * Math.PI;      // +up (top row) .. -down
     for (let i = 0; i < W; i++) {
-      const theta = (i / (W - 1)) * Math.PI * 2;
+      const theta = (i / (W - 1) - 0.5) * Math.PI * 2;
       dir.set(Math.cos(phi) * Math.cos(theta), Math.sin(phi), Math.cos(phi) * Math.sin(theta));
-      const c = skyColor(dir);
+      const c = addClouds(skyColor(dir), dir);
       const k = (j * W + i) * 4;
       img.data[k] = Math.round(255 * Math.pow(c.r, 1 / 2.2));
       img.data[k + 1] = Math.round(255 * Math.pow(c.g, 1 / 2.2));
@@ -111,6 +170,10 @@ const odo = new THREE.Vector2();
 
 /** Water surface height at a world point - mirrored in the shader. */
 function waveHeight(x, z, t) {
+  // the shader eases the swell out with distance from the middle
+  const r = Math.hypot(x, z);
+  const u = Math.min(1, Math.max(0, (r - 6) / 54));
+  const fade = 1 - 0.65 * u * u * (3 - 2 * u);
   x += odo.x; z += odo.y;
   let h = 0;
   for (const [dx, dz, a, l, s] of WAVES) {
@@ -118,8 +181,11 @@ function waveHeight(x, z, t) {
     const k = (Math.PI * 2) / l;
     h += a * Math.sin(k * (x * dx + z * dz) / n + t * s * 2.0);
   }
-  return h;
+  return h * fade;
 }
+
+/** Sea height at a point fixed in the water (water = world + odometer). */
+const seaAt = (wx, wz) => waveHeight(wx - odo.x, wz - odo.y, state.t);
 
 const WATER_VS = /* glsl */`
   uniform float uTime;
@@ -186,10 +252,9 @@ const WATER_FS = /* glsl */`
     return mix(uHull[i], uHull[i + 1], f - float(i));
   }
 
-  // True where this point of the sea lies inside the hull: the water
-  // there is the boat's interior, so it must not be drawn.
-  bool insideHull(vec3 w) {
-    vec3 b = (uBoatInv * vec4(w, 1.0)).xyz;
+  // True where this point of the sea (in a boat's frame) lies inside the
+  // hull: the water there is the boat's interior, so it must not be drawn.
+  bool insideHull(vec3 b) {
     if (b.x <= 0.0 || b.x >= ${SPEC.loa.toFixed(3)}) return false;
     vec4 h = hullAt(b.x);
     if (b.y <= h.z || b.y >= h.x + 0.15) return false;
@@ -202,9 +267,9 @@ const WATER_FS = /* glsl */`
   // arms of the Kelvin wedge (19.5 deg half-angle) spreading astern.
   // Worked out in the boat frame (+x aft, +z port); the foam's texture is
   // fixed to the water, so it streams aft past her as she sails.
-  float wakeFoam(vec3 w) {
-    if (uWake <= 0.001) return 0.0;
-    vec3 b = (uBoatInv * vec4(w, 1.0)).xyz;
+  // \`b\` is the point in the boat's frame, \`wake\` her speed factor.
+  float wakeShape(vec3 b, float wake) {
+    if (wake <= 0.001) return 0.0;
     float L = ${SPEC.loa.toFixed(3)};
     if (b.x < -0.6 || b.x > 16.0 || abs(b.z) > 7.0) return 0.0;
     float foam = 0.0;
@@ -214,7 +279,7 @@ const WATER_FS = /* glsl */`
       vec4 h = hullAt(b.x);
       float k = clamp((b.y - h.z) / max(h.x - h.z, 1e-3), 0.0, 1.0);
       float off = abs(b.z) - mix(h.w, h.y, k);
-      float band = 0.05 + 0.10 * uWake;
+      float band = 0.05 + 0.10 * wake;
       foam += smoothstep(band, 0.0, off) * step(-0.03, off)
             * mix(1.0, 0.45, b.x / L);
     }
@@ -237,13 +302,21 @@ const WATER_FS = /* glsl */`
       // the ruffled water between the arms
       foam += step(abs(b.z), dd * 0.354) * exp(-dd * 0.35) * 0.18;
     }
+    return foam * wake;
+  }
 
-    // break it up with noise that rides on the water
+  // The fleet: the other boats' inverse world matrices, and their wake
+  // factors (< 0 where there is no boat).
+  uniform mat4 uFleetInv[${FLEET_N}];
+  uniform float uFleetWake[${FLEET_N}];
+
+  // Break the summed white water up with noise that rides on the water.
+  float foamTexture(float foam, vec3 w) {
+    if (foam <= 0.001) return 0.0;
     vec2 q = w.xz + uOffset;
     float n = vnoise(q * 5.0 + vec2(0.0, uTime * 0.3)) * 0.5
             + vnoise(q * 13.0 - uTime * 0.2) * 0.3
             + vnoise(q * 31.0 + uTime * 0.4) * 0.2;
-    foam *= uWake;
     return smoothstep(0.35, 0.9, foam * (0.25 + 1.2 * n));
   }
 
@@ -258,7 +331,15 @@ const WATER_FS = /* glsl */`
   }
 
   void main() {
-    if (insideHull(vWorld)) discard;
+    vec3 b0 = (uBoatInv * vec4(vWorld, 1.0)).xyz;
+    if (insideHull(b0)) discard;
+    float wakeSum = wakeShape(b0, uWake);
+    for (int i = 0; i < ${FLEET_N}; i++) {
+      if (uFleetWake[i] < 0.0) continue;
+      vec3 bi = (uFleetInv[i] * vec4(vWorld, 1.0)).xyz;
+      if (insideHull(bi)) discard;
+      wakeSum += wakeShape(bi, uFleetWake[i]);
+    }
     vec3 V = normalize(cameraPosition - vWorld);
     vec3 N = normalize(vNrm);
     // small-ripple normal detail
@@ -282,7 +363,7 @@ const WATER_FS = /* glsl */`
     col += uSunTint * path * smoothstep(0.55, 1.0, fres) * 0.10;
 
     // white water, lit by the sun and the sky
-    float foam = wakeFoam(vWorld);
+    float foam = foamTexture(wakeSum, vWorld);
     vec3 foamCol = vec3(0.86, 0.90, 0.93) * (0.75 + 0.35 * max(dot(N, uSun), 0.0));
     col = mix(col, foamCol, foam * 0.92);
 
@@ -304,6 +385,7 @@ const WATER_FS = /* glsl */`
 
 let renderer, scene, camera, controls, boat, water, sun, pmrem;
 let compass, windArrow, helm;
+let seaFrame, course, fleet, sailor;
 const MID = 1.15;   // midship, boat x: the heading turns about this point
 const state = {
   // Boom angle off the centreline, degrees: + to starboard, - to port.
@@ -318,6 +400,9 @@ const state = {
   labels: false,
   wire: false,
   spin: false,
+  sailor: true,             // sailors in the boats
+  course: false,            // race course laid and shown
+  fleet: false,             // other boats racing round it
   t: 0,
   // solved every frame from the wind, the course and the trim
   fill: 1,      // -1..1: which side the wind fills the sail, and how much
@@ -391,6 +476,9 @@ function init() {
   const env = pmrem.fromEquirectangular(skyTex).texture;
   scene.background = skyTex;
   scene.environment = env;
+  // Haze on the marks and the other boats far out, matching the sea's
+  // own haze toward the horizon (the water shader does its own).
+  scene.fog = new THREE.Fog(HORIZON.clone(), 45, 220);
 
   camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.05, 900);
   const c0 = CAMS.quarter;
@@ -401,7 +489,7 @@ function init() {
   controls.enableDamping = true;
   controls.dampingFactor = 0.075;
   controls.minDistance = 0.7;
-  controls.maxDistance = 26;
+  controls.maxDistance = 70;     // far enough out to see the course
   controls.maxPolarAngle = Math.PI * 0.495;
   controls.update();
 
@@ -440,6 +528,8 @@ function init() {
       uHull: { value: hullTable() },
       uOffset: { value: odo },
       uWake: { value: 0 },
+      uFleetInv: { value: Array.from({ length: FLEET_N }, () => new THREE.Matrix4()) },
+      uFleetWake: { value: new Array(FLEET_N).fill(-1) },
     },
     side: THREE.DoubleSide,
   });
@@ -456,6 +546,8 @@ function init() {
   helm.name = 'Heading';
   helm.position.set(MID, 0, 0);
   helm.add(boat.group);
+  sailor = createSailor();
+  boat.group.add(sailor.group);
   boat.group.position.x = -MID;
   scene.add(helm);
 
@@ -477,6 +569,18 @@ function init() {
   helm.updateMatrixWorld(true);
   const toRig = new THREE.Matrix4().copy(boat.rig.group.matrix).invert();
   boat.cleatRig = boat.cleatLocal.clone().applyMatrix4(toRig);
+
+  // ---- the race course and the fleet, fixed to the moving water ------
+  // This group sits at minus the odometer, so its children are placed in
+  // water coordinates and drift past as she sails.
+  seaFrame = new THREE.Group();
+  seaFrame.name = 'Sea frame';
+  course = createCourse();
+  course.group.visible = false;
+  fleet = createFleet();
+  fleet.group.visible = false;
+  seaFrame.add(course.group, fleet.group);
+  scene.add(seaFrame);
 
   addEventListener('resize', onResize);
   boot.classList.add('hide');
@@ -551,6 +655,7 @@ function animate() {
   }
 
   if (state.spin) setHeading(state.heading + dt * 15);   // turntable
+  steer(dt);
 
   sailTrim(dt, t);
 
@@ -558,6 +663,14 @@ function animate() {
   const ms = state.speed * 18 * 0.5144;
   odo.x += bowV.x * ms * dt;
   odo.y += bowV.z * ms * dt;
+
+  // the course and the fleet ride on the water
+  seaFrame.position.set(-odo.x, 0, -odo.y);
+  if (state.course) {
+    const me = new THREE.Vector2(MID + odo.x, odo.y);
+    raceInfo = course.update(dt, t, seaAt, trueFlow, state.wind, me);
+  }
+  if (state.fleet) fleet.update(dt, t, course, state.windFrom, state.wind, seaAt);
 
   // Float on the water.  The boat frame is +X aft, +Y up, +Z to port, so
   // heel is a rotation about X (+ heels to port) and pitch one about Z.
@@ -570,10 +683,10 @@ function animate() {
     const bx = Math.sin(state.heading * D2R), bz = -Math.cos(state.heading * D2R);
     const aft = SPEC.loa - MID;
     const h = waveHeight(MID, 0, t);
-    const hF = waveHeight(MID - bx * aft, -bz * aft, t);
-    const hA = waveHeight(MID + bx * MID, bz * MID, t);
+    const hS = waveHeight(MID - bx * aft, -bz * aft, t);   // under the stern
+    const hB = waveHeight(MID + bx * MID, bz * MID, t);    // under the bow
     boat.group.position.y = y0 + h;
-    boat.group.rotation.z = Math.atan2(hF - hA, SPEC.loa) * 0.85;
+    boat.group.rotation.z = Math.atan2(hS - hB, SPEC.loa) * 0.85;   // +z lifts the stern
     boat.group.rotation.x = heel * (0.82 + 0.18 * Math.sin(t * 0.9));
     boat.group.rotation.y = 0.03 * Math.sin(t * 0.4) - heel * 0.25;
   } else {
@@ -591,10 +704,18 @@ function animate() {
   });
   helm.updateMatrixWorld(true);
   updateMainsheet(boat.rig, boat.cleatRig);
+  if (state.sailor) sailor.update({ boomDeg: state.boom, heel: state.heel, t, boat });
 
-  water.material.uniforms.uTime.value = t;
-  water.material.uniforms.uWake.value = Math.min(1.2, (state.speed * 18) / 3);
-  water.material.uniforms.uBoatInv.value.copy(boat.group.matrixWorld).invert();
+  const U = water.material.uniforms;
+  U.uTime.value = t;
+  U.uWake.value = Math.min(1.2, (state.speed * 18) / 3);
+  U.uBoatInv.value.copy(boat.group.matrixWorld).invert();
+  seaFrame.updateMatrixWorld(true);
+  if (state.fleet) fleet.updateRigs(t, state.wind);
+  fleet.boats.forEach((s, i) => {
+    U.uFleetWake.value[i] = state.fleet ? Math.min(1.2, (s.speed * 18) / 3) : -1;
+    if (state.fleet) U.uFleetInv.value[i].copy(s.b.group.matrixWorld).invert();
+  });
 
   // the masthead vane shows the apparent wind
   setWindVane(boat.rig, appFlow, t);
@@ -604,7 +725,101 @@ function animate() {
 
   if (state.labels) drawLabels();
   updateReadout();
+  updateRaceHud();
   requestAnimationFrame(animate);
+}
+
+/* ------------------------------------------------------------------ *
+ * steering from the keyboard: left/right arrows or A/D
+ * ------------------------------------------------------------------ */
+
+const keys = new Set();
+const TURN_RATE = 40;   // deg/s
+addEventListener('keydown', (e) => {
+  const el = document.activeElement;
+  if (el && (el.tagName === 'INPUT' && el.type === 'text')) return;
+  const k = e.key.toLowerCase();
+  if (['arrowleft', 'arrowright', 'a', 'd'].includes(k)) {
+    keys.add(k);
+    e.preventDefault();          // don't nudge a focused slider as well
+  }
+});
+addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+addEventListener('blur', () => keys.clear());
+
+/** Turn the bow, and swing the camera round with her so the view follows. */
+function steer(dt) {
+  let dir = 0;
+  if (keys.has('arrowleft') || keys.has('a')) dir -= 1;
+  if (keys.has('arrowright') || keys.has('d')) dir += 1;
+  if (!dir) return;
+  const dh = dir * TURN_RATE * dt;
+  setHeading(state.heading + dh);
+  const yaw = -dh * D2R;
+  for (const v of [camera.position, controls.target]) {
+    v.x -= MID;
+    v.applyAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
+    v.x += MID;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * race HUD
+ * ------------------------------------------------------------------ */
+
+let raceInfo = null;
+const raceHud = document.getElementById('race');
+const fmtTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+function updateRaceHud() {
+  if (!raceHud) return;
+  if (!state.course || !raceInfo) { raceHud.style.display = 'none'; return; }
+  raceHud.style.display = 'block';
+  const r = raceInfo;
+  const go = `<b>${r.dist.toFixed(0)} m</b> at <b>${pad3(r.brg)}&deg;</b>`;
+  let html;
+  if (r.phase === 'pre') {
+    html = `<div class="big">Cross the start line upwind</div>start line ${go}`;
+  } else if (r.phase === 'racing') {
+    html = `<div class="big">${r.label} &middot; ${fmtTime(r.time)}</div>${go}` +
+      `<div class="legs">${r.legs.map((n, i) =>
+        `<span class="${i < r.next ? 'done' : i === r.next ? 'cur' : ''}">${n}</span>`).join('')}` +
+      `<span class="${r.next >= r.legs.length ? 'cur' : ''}">F</span></div>`;
+  } else {
+    html = `<div class="big">Finished in ${fmtTime(r.time)}</div>` +
+      (r.best != null ? `best ${fmtTime(r.best)} &middot; ` : '') + 'Re-lay the course to race again';
+  }
+  if (raceHud._html !== html) { raceHud.innerHTML = html; raceHud._html = html; }
+}
+
+/** Lay the course for the present wind, just upwind of the boat; restart. */
+function layCourse() {
+  course.layout(new THREE.Vector2(MID + odo.x, odo.y), state.windFrom);
+  fleet.reset(course, state.windFrom);
+  raceInfo = null;
+}
+
+function setCourse(on) {
+  state.course = on;
+  if (on && !course.laid) layCourse();
+  course.group.visible = on;
+  ui.course.checked = on;
+  if (!on) setFleet(false);
+}
+
+function setSailor(on) {
+  state.sailor = on;
+  sailor.group.visible = on;
+  if (!on) sailor.release(boat);
+  fleet.setSailors(on);
+  ui.sailor.checked = on;
+}
+
+function setFleet(on) {
+  if (on && !state.course) setCourse(true);
+  if (on && !state.fleet) fleet.reset(course, state.windFrom);   // join at the start
+  state.fleet = on;
+  fleet.group.visible = on;
+  ui.fleet.checked = on;
 }
 
 /* ------------------------------------------------------------------ *
@@ -963,6 +1178,16 @@ function bindUI() {
     compass.visible = windArrow.visible = ui.compass.checked;
   });
 
+  ui.sailor = $('sailorChk');
+  ui.sailor.addEventListener('change', () => setSailor(ui.sailor.checked));
+  ui.course = $('courseChk'); ui.fleet = $('fleetChk');
+  ui.course.addEventListener('change', () => setCourse(ui.course.checked));
+  ui.fleet.addEventListener('change', () => setFleet(ui.fleet.checked));
+  $('relay').addEventListener('click', () => {
+    layCourse();
+    if (!state.course) setCourse(true);
+  });
+
   document.getElementById('cams').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-cam]');
     if (!b) return;
@@ -991,8 +1216,15 @@ function bindUI() {
     const pp = boat.group.position.clone();
     boat.group.quaternion.identity();
     boat.group.position.set(0, 0, 0);
+    // the boat alone: no sailor, tiller extension at rest
+    const extQ = boat.rudder.extension.quaternion.clone();
+    const sailorShown = sailor.group.visible;
+    sailor.group.visible = false;
+    sailor.release(boat);
     helm.updateMatrixWorld(true);
     const restore = () => {
+      sailor.group.visible = sailorShown;
+      boat.rudder.extension.quaternion.copy(extQ);
       boat.group.quaternion.copy(pq);
       boat.group.position.copy(pp);
       helm.updateMatrixWorld(true);
@@ -1132,13 +1364,18 @@ try {
 window.OPTi = {
   get boat() { return boat; },
   get state() { return state; },
+  get sailor() { return sailor; },
+  setSailor,
   get scene() { return scene; },
   get camera() { return camera; },
   get controls() { return controls; },
   get water() { return water; },
   odo,
   get helm() { return helm; },
-  setHeading, setWindFrom, camFor,
+  get course() { return course; },
+  get fleet() { return fleet; },
+  get raceInfo() { return raceInfo; },
+  setHeading, setWindFrom, camFor, setCourse, setFleet, layCourse,
   CAMS,
   /** Resolves after `n` rendered frames - the only reliable way to wait
    *  for a state change to reach the screen under a slow software GL. */
