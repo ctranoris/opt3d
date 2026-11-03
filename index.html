@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimist Dinghy - 3D viewer</title>
+<!-- A sprit-rig silhouette, inline so the page asks the server for nothing. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M9 3 L9 22 L24 6 Z' fill='%23e8e6df'/%3E%3Cpath d='M4 24 L28 24 L23 30 L8 30 Z' fill='%23c96a3d'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --panel: rgba(16, 22, 30, 0.72);
+    --panel-line: rgba(255, 255, 255, 0.12);
+    --text: #e8eef5;
+    --muted: #93a4b8;
+    --accent: #5cc8ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1016; }
+  body {
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* ---------- control panel ---------- */
+  #panel {
+    position: absolute; top: 14px; left: 14px; width: 268px;
+    background: var(--panel); border: 1px solid var(--panel-line);
+    border-radius: 12px; padding: 12px 13px 13px;
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.38);
+    user-select: none;
+  }
+  #panel h1 {
+    margin: 0 0 2px; font-size: 14px; font-weight: 650; letter-spacing: 0.01em;
+  }
+  #panel .sub { margin: 0 0 11px; color: var(--muted); font-size: 11.5px; }
+  .grp { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--panel-line); }
+  .grp:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+  .grp > .ttl {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
+  .row label { flex: 0 0 74px; color: var(--muted); font-size: 12px; }
+  .row output {
+    flex: 0 0 46px; text-align: right; font-variant-numeric: tabular-nums;
+    font-size: 11.5px; color: var(--text);
+  }
+  input[type=range] {
+    flex: 1 1 auto; -webkit-appearance: none; appearance: none;
+    height: 20px; background: transparent; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.2);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 13px; height: 13px; margin-top: -5px;
+    border-radius: 50%; background: var(--accent); border: 2px solid #0b1016;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  }
+  input[type=range]::-moz-range-track {
+    height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.2);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; border: 2px solid #0b1016;
+    background: var(--accent);
+  }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  button {
+    font: inherit; font-size: 11.5px; color: var(--text); cursor: pointer;
+    background: rgba(255, 255, 255, 0.07); border: 1px solid var(--panel-line);
+    border-radius: 7px; padding: 5px 9px; transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover { background: rgba(255, 255, 255, 0.15); }
+  button.on { background: var(--accent); color: #04131d; border-color: transparent; font-weight: 600; }
+  .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
+  .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
+  .chk input { accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; }
+  #hint {
+    margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--panel-line);
+    color: var(--muted); font-size: 11px;
+  }
+  #hint b { color: var(--text); font-weight: 600; }
+  #panel.min { padding-bottom: 0; }
+  #panel.min .body { display: none; }
+  #toggle {
+    position: absolute; top: 10px; right: 10px; line-height: 1;
+    padding: 3px 7px; font-size: 12px;
+  }
+
+  /* ---------- part labels ---------- */
+  #labels { position: absolute; inset: 0; pointer-events: none; display: none; }
+  #labels.on { display: block; }
+  #leaders { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .lbl {
+    position: absolute; transform: translate(-50%, -50%);
+    background: rgba(10, 16, 22, 0.82); border: 1px solid rgba(255, 255, 255, 0.18);
+    color: var(--text); border-radius: 6px; padding: 2px 7px;
+    font-size: 11.5px; white-space: nowrap;
+  }
+
+  /* ---------- readout ---------- */
+  #readout {
+    position: absolute; right: 14px; bottom: 13px; text-align: right;
+    color: rgba(255, 255, 255, 0.72); font-size: 11px; line-height: 1.6;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+  #readout b { color: #fff; font-weight: 600; }
+
+  /* ---------- boot / error ---------- */
+  #boot {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: #0b1016; color: var(--muted); font-size: 13px; z-index: 20;
+    text-align: center; padding: 24px;
+  }
+  #boot.err { color: #ff9c9c; }
+  #boot .card {
+    max-width: 560px; background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--panel-line); border-radius: 12px; padding: 22px 24px;
+  }
+  #boot code {
+    background: rgba(255, 255, 255, 0.09); padding: 2px 6px; border-radius: 4px;
+    color: #cfe6f7; font-size: 12px;
+  }
+  #boot.hide { display: none; }
+  @media (max-width: 640px) {
+    #panel { width: calc(100% - 28px); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="labels"><svg id="leaders"></svg></div>
+
+  <div id="panel">
+    <h1>Optimist Dinghy</h1>
+    <p class="sub">Single-handed sprit-rig dinghy &middot; 2.30 m &times; 1.13 m</p>
+    <button id="toggle" title="Collapse panel">&minus;</button>
+
+    <div class="body">
+      <div class="grp">
+        <div class="ttl">Sail trim</div>
+        <div class="row">
+          <label for="sheet">Mainsheet</label>
+          <input id="sheet" type="range" min="0" max="100" value="65">
+          <output id="sheetOut">65%</output>
+        </div>
+        <div class="row">
+          <label for="wind">Wind</label>
+          <input id="wind" type="range" min="0" max="100" value="45">
+          <output id="windOut">8 kn</output>
+        </div>
+        <div class="row">
+          <label for="camber">Draft</label>
+          <input id="camber" type="range" min="0" max="100" value="55">
+          <output id="camberOut">55%</output>
+        </div>
+        <div class="checks">
+          <label class="chk"><input id="autoSail" type="checkbox" checked>Auto sail</label>
+          <label class="chk"><input id="seaMotion" type="checkbox" checked>Sea motion</label>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="ttl">View</div>
+        <div class="btns" id="cams">
+          <button data-cam="quarter" class="on">Quarter</button>
+          <button data-cam="windward">Windward</button>
+          <button data-cam="leeward">Leeward</button>
+          <button data-cam="bow">Bow</button>
+          <button data-cam="stern">Stern</button>
+          <button data-cam="top">Plan</button>
+          <button data-cam="sail">Sail</button>
+        </div>
+        <div class="checks" style="margin-top:9px">
+          <label class="chk"><input id="labelsChk" type="checkbox">Part labels</label>
+          <label class="chk"><input id="wireChk" type="checkbox">Wireframe</label>
+          <label class="chk"><input id="waterChk" type="checkbox" checked>Water</label>
+          <label class="chk"><input id="spinChk" type="checkbox">Turntable</label>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="ttl">Export</div>
+        <div class="btns">
+          <button id="glb">Download .glb</button>
+          <button id="png">Save image</button>
+        </div>
+      </div>
+
+      <div id="hint">
+        <b>Drag the sail</b> sideways to sheet it in and out. Orbit with the left
+        button, zoom with the wheel.
+      </div>
+    </div>
+  </div>
+
+  <div id="readout"></div>
+
+  <div id="boot">
+    <div class="card">
+      <div id="bootMsg">Building the boat&hellip;</div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./lib/three.module.js",
+    "three/addons/controls/OrbitControls.js": "./lib/OrbitControls.js",
+    "three/addons/exporters/GLTFExporter.js": "./lib/GLTFExporter.js"
+  }
+}
+</script>
+<script type="module" src="./viewer.js"></script>
+</body>
+</html>
