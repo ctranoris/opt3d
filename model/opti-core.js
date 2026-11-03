@@ -1,38 +1,51 @@
 /**
- * Optimist dinghy - shared constants, math and lofting tables.
+ * Optimist dinghy - class dimensions, hull lines and the lofting maths.
  *
  * Boat-local frame (right handed):
- *   +X aft   (bow at x = 0, transom at x = SPEC.loa)
- *   +Y up    (y = 0 is the baseline, i.e. the keel line amidships)
+ *   +X aft   (bow transom top at x = 0, stern transom at x = SPEC.loa)
+ *   +Y up    (y = 0 is the baseline: the lowest point of the bottom)
  *   +Z to starboard
+ *
+ * Where the numbers come from (init_assets/):
+ *   Optimist_dinghy.png       class side profile, to scale - sheer, rocker,
+ *                             transom heights and rake, mast, board and rig
+ *                             positions (2.30 m = 341 px, 6.745 mm/px)
+ *   Opti Model.stl            a print-plate model whose hull half is an
+ *                             accurate plan view - half breadths at the sheer
+ *                             and the floor, and the interior layout
+ *   Optimist_dinghy_02.png    photo, top down - confirms the layout
+ *   SBM125 plan               sail lengths (luff, head, foot, leech)
  */
 
 export const SPEC = {
-  loa: 2.30,          // length overall, m
-  beam: 1.13,         // maximum beam, m
-  shell: 0.008,       // hull skin thickness
-  waterline: 0.17,    // baseline below the water surface
+  loa: 2.30,          // hull length, m
+  beam: 1.13,         // maximum beam at the sheer
+  shell: 0.008,       // GRP skin thickness
+  waterline: 0.10,    // baseline below the water surface, sailing trim
 
-  // --- rig: class-rule / SBM plan dimensions ------------------------
-  mastFromBow: 0.35,  // mast centreline distance aft of the bow
-  rigRake: 7.0,       // deg - mast rake aft
-  luff: 1.68,         // 5'-6"  tack -> head
-  headToPeak: 1.22,   // 4'-0"  head -> peak
-  sprit: 2.46,        // 8'-1"  the sprit spar, tack end -> peak
-  leech: 2.59,        // 8'-6"  peak -> corner, measured along the cloth
-  foot: 1.93,         // 6'-4"  tack -> corner, along the boom
-  spritHook: 0.15,    // the sprit's lower end hooks this far below the tack
-  boomRise: 2.5,      // deg - the boom sits nearly level, as on the plan
-  mastAboveHead: 0.16,
-  tackHeight: 0.45,   // gooseneck height above the baseline
-  mastDia: 0.062,
+  // --- rig ------------------------------------------------------------
+  mastFromBow: 0.30,  // mast centreline aft of the bow transom top
+  rigRake: 1.5,       // deg - the mast stands near vertical
+  tackHeight: 0.70,   // boom jaws above the baseline
+  luff: 1.68,         // 5'-6"  tack -> throat, along the mast
+  headToPeak: 1.22,   // 4'-0"  throat -> peak
+  foot: 1.93,         // 6'-4"  tack -> clew, along the boom
+  leech: 2.67,        // 8'-9"  peak -> clew
+  snotter: 0.55,      // sprit heel: this far up the mast above the tack
+  spritOver: 0.04,    // sprit tip reaches past the peak
+  boomRise: 0,        // deg - the boom sits level
+  mastAboveHead: 0.05,
+  mastDia: 0.050,
   boomDia: 0.040,
   spritDia: 0.032,
 
-  // --- hull furniture -----------------------------------------------
-  boardCase: [0.80, 1.10, 0.15],   // case x0, x1, inside width
-  boardDepth: 0.52,
-  cockpit: { x0: 0.44, x1: 1.98 },
+  // --- interior (x from the bow) ------------------------------------
+  mastThwart: [0.22, 0.41],     // fore and aft edges
+  centreThwart: [1.22, 1.34],
+  boardCase: [0.92, 1.28, 0.08], // x0, x1, outside width
+  board: { x0: 0.955, chord: 0.29, below: 0.50 },
+  sideBags: [0.43, 1.21],
+  sternBag: { x: 2.19, r: 0.09 },
 };
 
 export const D2R = Math.PI / 180;
@@ -72,90 +85,159 @@ export function range(a, b, n) {
   return out;
 }
 
-/* ------------------------------------------------------------------ *
- * Hull lofting tables.
- *
- * Station table, x measured aft of the bow:
- *   [x, sheerY, sheerHalf, chineZ, chineHalf, bilgeHalf, roundK]
- *
- * sheerY     height of the inwale
- * sheerHalf  half breadth at the inwale (max 0.565 amidships = 1.13 m beam)
- * chineZ     height of the turn of the bilge
- * chineHalf  half breadth at the turn of the bilge
- * bilgeHalf  half breadth of the flat of the bottom
- * roundK     exponent controlling how hard the turn is
- * ------------------------------------------------------------------ */
-
-export const STATIONS = [
-  [0.00, 0.330, 0.022, 0.150, 0.014, 0.005, 0.55],
-  [0.12, 0.345, 0.175, 0.200, 0.120, 0.055, 0.42],
-  [0.35, 0.365, 0.360, 0.280, 0.285, 0.195, 0.34],
-  [0.55, 0.385, 0.480, 0.330, 0.405, 0.315, 0.28],
-  [0.80, 0.405, 0.545, 0.360, 0.482, 0.418, 0.24],
-  [1.10, 0.425, 0.565, 0.375, 0.516, 0.470, 0.22],
-  [1.40, 0.445, 0.565, 0.382, 0.520, 0.486, 0.21],
-  [1.70, 0.465, 0.556, 0.380, 0.515, 0.482, 0.21],
-  [1.95, 0.485, 0.545, 0.372, 0.505, 0.472, 0.22],
-  [2.15, 0.500, 0.534, 0.362, 0.494, 0.458, 0.24],
-  [2.30, 0.512, 0.522, 0.352, 0.484, 0.446, 0.26],
-];
-
-const BEAM_HALF = SPEC.beam / 2;
-
-function station(x) {
-  return sampleTable(STATIONS, Math.min(Math.max(x, 0), SPEC.loa));
-}
-
-/** Height of the inwale at station x. */
-export function sheerY(x) { return station(x)[0]; }
-
-/** Half breadth of the outside skin at station x, height y. */
-export function halfWidth(x, y) {
-  const [sy, sh, cz, ch, bh, k] = station(x);
-  if (y <= 0) return bh;
-  if (y >= sy) return sh;
-  if (y >= cz) {
-    const t = (y - cz) / Math.max(1e-6, sy - cz);
-    return ch + (sh - ch) * Math.pow(t, 0.85);
-  }
-  const t = y / Math.max(1e-6, cz);
-  return bh + (ch - bh) * Math.pow(t, Math.max(0.08, k));
-}
-
-/** Height of the outside skin at station x, half breadth z. */
-export function skinY(x, z) {
-  const [sy, sh, cz, ch, bh, k] = station(x);
-  const zz = Math.min(Math.abs(z), sh);
-  if (zz <= bh) return 0;
-  if (zz <= ch) {
-    const t = (zz - bh) / Math.max(1e-6, ch - bh);
-    return cz * Math.pow(t, Math.max(0.35, k));
-  }
-  const t = (zz - ch) / Math.max(1e-6, sh - ch);
-  return cz + (sy - cz) * Math.pow(t, 0.85);
-}
-
-/** Half breadth / height of the inside skin (offset inboard by the skin). */
-export function innerHalf(x, y) { return Math.max(0, halfWidth(x, y) - SPEC.shell * 1.3); }
-export function innerY(x, z) { return skinY(x, z) - SPEC.shell * 1.3; }
-
-/** Height of the side deck: a constant drop below the inwale. */
-export function deckY(x) { return sheerY(x) - 0.062; }
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const smooth = (t) => t * t * (3 - 2 * t);
 
 /* ------------------------------------------------------------------ *
- * Cockpit outline: half breadth of the coaming at station x, or null
- * outside the cockpit.
+ * Hull lines.
+ *
+ * An Optimist is a pram: a flat, rockered bottom, flared straight sides,
+ * a raked bow transom about half the beam wide and a vertical stern
+ * transom.  Four curves define it:
+ *
+ *   SHEER        [x, height of the sheer]                 class profile
+ *   ROCKER       [x, height of the bottom]                class profile
+ *   SHEER_HALF   [x, half breadth at the sheer]           STL plan
+ *   BOTTOM_HALF  [x, half breadth where the flat bottom   STL plan
+ *                     turns up into the side]
+ *
+ * Forward of BOW_KNUCKLE the "bottom" is the raked bow transom itself: it
+ * runs straight from the sheer at x = 0 down to the knuckle, so the
+ * section there is a strip of transom, and the loft draws the transom as
+ * part of the same surface.
  * ------------------------------------------------------------------ */
 
-const COCKPIT = [
-  [0.44, 0.060], [0.50, 0.235], [0.60, 0.330], [0.78, 0.372],
-  [1.05, 0.385], [1.35, 0.388], [1.62, 0.380], [1.82, 0.352],
-  [1.93, 0.250], [1.98, 0.060],
+const SHEER = [
+  [0.00, 0.410], [0.40, 0.400], [0.80, 0.393], [1.20, 0.390],
+  [1.60, 0.392], [2.00, 0.398], [2.30, 0.405],
 ];
 
-export function cockpitHalf(x) {
-  if (x <= COCKPIT[0][0] || x >= COCKPIT[COCKPIT.length - 1][0]) return null;
-  return sampleTable(COCKPIT, x)[0];
+export const BOW_KNUCKLE = [0.155, 0.108];   // bow transom foot, x and y
+
+const ROCKER = [
+  [0.155, 0.108], [0.34, 0.067], [0.51, 0.045], [0.67, 0.027],
+  [0.84, 0.012], [1.00, 0.004], [1.15, 0.000], [1.35, 0.000],
+  [1.69, 0.018], [2.02, 0.045], [2.30, 0.081],
+];
+
+const SHEER_HALF = [
+  [0.00, 0.291], [0.10, 0.325], [0.20, 0.359], [0.30, 0.391],
+  [0.40, 0.418], [0.50, 0.445], [0.60, 0.469], [0.70, 0.489],
+  [0.80, 0.506], [0.90, 0.521], [1.00, 0.535], [1.10, 0.546],
+  [1.20, 0.554], [1.30, 0.560], [1.40, 0.564], [1.50, 0.565],
+  [1.60, 0.564], [1.70, 0.560], [1.80, 0.554], [1.90, 0.547],
+  [2.00, 0.538], [2.10, 0.526], [2.20, 0.511], [2.30, 0.496],
+];
+
+const BOTTOM_HALF = [
+  [0.00, 0.272], [0.155, 0.262], [0.30, 0.302], [0.50, 0.368],
+  [0.70, 0.413], [0.90, 0.446], [1.10, 0.466], [1.30, 0.477],
+  [1.50, 0.481], [1.70, 0.479], [1.90, 0.471], [2.10, 0.459],
+  [2.30, 0.446],
+];
+
+const at = (table, x) => sampleTable(table, clamp(x, table[0][0], table[table.length - 1][0]))[0];
+
+/** Height of the sheer at station x. */
+export function sheerY(x) { return at(SHEER, x); }
+
+/** Half breadth at the sheer. */
+export function sheerHalf(x) { return at(SHEER_HALF, x); }
+
+/** Half breadth of the flat of the bottom. */
+export function bottomHalf(x) { return at(BOTTOM_HALF, x); }
+
+/**
+ * Height of the outside bottom at station x.  Forward of the knuckle it
+ * is the raked bow transom, blended into the rocker over a short radius
+ * so the two read as one moulding rather than a crease.
+ */
+export function bottomY(x) {
+  const [kx, ky] = BOW_KNUCKLE;
+  const y0 = sheerY(0);
+  const transom = y0 + (ky - y0) * clamp(x / kx, 0, 1.5);
+  const rocker = at(ROCKER, Math.max(x, kx));
+  const b = 0.035;   // blend half-width either side of the knuckle
+  if (x <= kx - b) return transom;
+  if (x >= kx + b) return rocker;
+  const t = smooth((x - (kx - b)) / (2 * b));
+  // the blend sits slightly inside both lines, like a moulded radius
+  return transom + (rocker - transom) * t;
+}
+
+/** Bilge radius at station x: how hard the bottom turns up into the side. */
+export function bilgeR(x) {
+  const depth = sheerY(x) - bottomY(x);
+  return Math.min(0.065, depth * 0.35, bottomHalf(x) * 0.5);
+}
+
+/** Height of the inside of the floor. */
+export function floorY(x) { return bottomY(x) + SPEC.shell; }
+
+/**
+ * Half breadth of the inside skin at station x, height y (above the
+ * bilge).  The sides are straight between the bilge and the sheer.
+ */
+export function insideHalf(x, y) {
+  const sy = sheerY(x), sh = sheerHalf(x);
+  const by = bottomY(x), bh = bottomHalf(x);
+  const t = clamp((y - by) / Math.max(1e-6, sy - by), 0, 1);
+  return bh + (sh - bh) * t - SPEC.shell * 1.15;
+}
+
+/* ------------------------------------------------------------------ *
+ * The hull section: one starboard half, sheer -> bottom centreline.
+ * ------------------------------------------------------------------ */
+
+const N_SIDE = 9;     // points down the straight side
+const N_BILGE = 7;    // points round the bilge
+const N_FLAT = 6;     // points across the half bottom
+
+export const HALF_POINTS = N_SIDE + N_BILGE + N_FLAT;
+
+/**
+ * Skin of the starboard half at station x, as [y, z] pairs from the sheer
+ * down the side, round the bilge and in to the centreline.  `inset` > 0
+ * gives the inside skin: the bottom moves up by the shell measured square
+ * to it (which on the raked bow transom is much more than vertically), and
+ * the sides move in.
+ */
+export function halfSection(x, inset = 0) {
+  const sy = sheerY(x);
+  let sh = sheerHalf(x), by = bottomY(x), bh = bottomHalf(x);
+  let r = bilgeR(x);
+  if (inset > 0) {
+    const e = 0.002;
+    const slope = (bottomY(x + e) - bottomY(x - e)) / (2 * e);
+    by = Math.min(sy, by + inset * Math.hypot(1, slope));
+    sh -= inset * 1.1;
+    bh -= inset * 1.1;
+    r = Math.max(0, r - inset);
+    r = Math.min(r, (sy - by) * 0.35);
+  }
+
+  // corner C where the side line meets the bottom line
+  const C = [by, bh];
+  const S = [sy, sh];
+  const sideLen = Math.hypot(S[0] - C[0], S[1] - C[1]) || 1e-6;
+  const P1 = [C[0] + (S[0] - C[0]) * (r / sideLen), C[1] + (S[1] - C[1]) * (r / sideLen)];
+  const P2 = [by, bh - r];
+
+  const pts = [];
+  for (let i = 0; i < N_SIDE; i++) {
+    const t = i / N_SIDE;
+    pts.push([S[0] + (P1[0] - S[0]) * t, S[1] + (P1[1] - S[1]) * t]);
+  }
+  for (let i = 0; i < N_BILGE; i++) {
+    const t = i / (N_BILGE - 1);
+    const a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+    pts.push([a * P1[0] + b * C[0] + c * P2[0], a * P1[1] + b * C[1] + c * P2[1]]);
+  }
+  for (let i = 1; i <= N_FLAT; i++) {
+    const t = i / N_FLAT;
+    pts.push([by, (bh - r) * (1 - t)]);
+  }
+  return pts;
 }
 
 /* ------------------------------------------------------------------ *
@@ -164,11 +246,15 @@ export function cockpitHalf(x) {
 
 /**
  * Grid surface.  `profiles[i]` is an array of [y, z] for station
- * `xs[i]`.  Returns {pos, norm, uv, idx} ready for `shade()` and
- * `toGeometry()`.
+ * `xs[i]` (or [x, y, z] when `xyz` is set).  `flip` reverses the winding,
+ * and so the normals - which matter even on double-sided materials,
+ * because the shadow normal bias follows the stored normal.  Returns
+ * {pos, norm, uv, col, idx} ready for `toGeometry()`.
  */
 export function loft(profiles, xs, opts = {}) {
-  const { closed = false, capStart = false, capEnd = false, colorAt = null } = opts;
+  const {
+    closed = false, capStart = false, capEnd = false, colorAt = null, xyz = false, flip = false,
+  } = opts;
   const pos = [], norm = [], uv = [], col = [], idx = [];
   const rows = [];
 
@@ -177,7 +263,8 @@ export function loft(profiles, xs, opts = {}) {
     const prof = profiles[i];
     const start = pos.length / 3;
     for (let j = 0; j < prof.length; j++) {
-      pos.push(xs[i], prof[j][0], prof[j][1]);
+      if (xyz) pos.push(prof[j][0], prof[j][1], prof[j][2]);
+      else pos.push(xs[i], prof[j][0], prof[j][1]);
       norm.push(0, 0, 0);
       uv.push(u, j / Math.max(1, prof.length - 1));
       const c = colorAt ? colorAt(i, j, profiles.length, prof.length) : null;
@@ -194,19 +281,21 @@ export function loft(profiles, xs, opts = {}) {
       const j2 = closed ? (j + 1) % a.count : j + 1;
       const a0 = a.start + j, a1 = a.start + j2;
       const b0 = b.start + j, b1 = b.start + j2;
-      idx.push(a0, b0, a1, a1, b0, b1);
+      if (flip) idx.push(a0, a1, b0, a1, b1, b0);
+      else idx.push(a0, b0, a1, a1, b0, b1);
     }
   }
 
   const cap = (row, flip) => {
-    let cy = 0, cz = 0;
+    let cx = 0, cy = 0, cz = 0;
     for (let j = 0; j < row.count; j++) {
+      cx += pos[row.start * 3 + j * 3];
       cy += pos[row.start * 3 + 1 + j * 3];
       cz += pos[row.start * 3 + 2 + j * 3];
     }
-    cy /= row.count; cz /= row.count;
+    cx /= row.count; cy /= row.count; cz /= row.count;
     const c = pos.length / 3;
-    pos.push(pos[row.start * 3], cy, cz); norm.push(0, 0, 0); uv.push(0.5, 0.5);
+    pos.push(cx, cy, cz); norm.push(0, 0, 0); uv.push(0.5, 0.5);
     col.push(col[row.start * 3], col[row.start * 3 + 1], col[row.start * 3 + 2]);
     for (let j = 0; j < row.count; j++) {
       const p0 = row.start + j, p1 = row.start + (j + 1) % row.count;

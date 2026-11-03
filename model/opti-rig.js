@@ -6,12 +6,18 @@
  * Rig-local frame, origin at the tack:
  *   +Y up the mast, +X aft, +Z to starboard (leeward).
  *
- * Sail corners, solved from the rule lengths
- *   luff 1.68 (tack->head), head->peak 1.22, sprit 2.46 (tack->peak),
- *   foot 1.93 (tack->corner), leech 2.06 (peak->corner):
+ * Sail corners, from the class sail lengths (SBM plan / class drawing):
+ *   luff  1.68 (tack -> throat, on the mast)
+ *   head  1.22 (throat -> peak)
+ *   foot  1.93 (tack -> clew, on a level boom)
+ *   leech 2.67 (peak -> clew)
  *
- *   peak   = circle(tack, sprit)  x circle(head, head->peak)
- *   corner = circle(tack, foot)   x circle(peak, leech)
+ *   clew = foot along the boom
+ *   peak = circle(throat, head) x circle(clew, leech)
+ *
+ * The sprit is not one of the sail's edges: it runs from the snotter, a
+ * rope loop on the mast about half a metre above the boom, diagonally up
+ * to the peak, and is what holds the peak up.
  */
 
 import * as THREE from '../lib/three.module.js';
@@ -34,17 +40,10 @@ function circleIntersect(c0, r0, c1, r1, sign) {
 }
 
 /**
- * The four corners, rig-local, +X aft and +Y up the mast.
- *
- * The rule lengths over-determine a flat quadrilateral, so each corner is
- * pinned the way the rig is actually rigged:
- *
- *   peak    where the sprit reaches - 8'-1" from its hook on the mast just
- *           below the tack, and 4'-0" out from the head
- *   corner  along the boom: 6'-4" of foot at the boom's angle of rise
- *
- * The leech then falls out of the two, at 8'-6" of cloth once its hollow
- * is counted, which is where the class rule puts it.
+ * The corners, rig-local, +X aft and +Y up the mast: tack, head (throat),
+ * peak, corner (clew), plus the sprit's heel (snotter) and tip.  Four sail
+ * lengths fix a quadrilateral once the boom angle is chosen; solving it
+ * this way gives the ~41 deg head edge and ~3.2 m2 of the class drawing.
  *
  * @param rake  mast rake in degrees; the boom's rise is quoted from the
  *              horizontal, and these corners are in the raked rig frame
@@ -53,31 +52,36 @@ export function rigCorners(rake = SPEC.rigRake) {
   const tack = { x: 0, y: 0 };
   const head = { x: 0, y: SPEC.luff };
 
-  // peak: intersection of circle(head, headToPeak) and circle(hook, sprit),
-  // taken aft of the mast.  Subtracting the two circle equations gives y.
-  const hook = -SPEC.spritHook;
-  const py = (SPEC.sprit * SPEC.sprit - SPEC.headToPeak * SPEC.headToPeak
-    + SPEC.luff * SPEC.luff + 2 * hook * SPEC.luff + hook * hook)
-    / (2 * (SPEC.luff - hook));
-  const px = Math.sqrt(Math.max(0,
-    SPEC.headToPeak * SPEC.headToPeak - (py - SPEC.luff) * (py - SPEC.luff)));
-  const peak = { x: px, y: py };
-
+  // clew: the foot laid along a level boom (level in the boat, so it
+  // rises by the rake in this frame)
   const rise = (rake + SPEC.boomRise) * D2R;
   const corner = { x: SPEC.foot * Math.cos(rise), y: SPEC.foot * Math.sin(rise) };
 
-  return { tack, head, peak, corner };
+  // peak: head edge from the throat, leech from the clew; of the two
+  // intersections take the one above the throat -> clew line, up and aft
+  const peak = circleIntersect(head, SPEC.headToPeak, corner, SPEC.leech, 1);
+
+  // the sprit: heel at the snotter, tip a little past the peak
+  const snotter = { x: 0, y: SPEC.snotter };
+  const dx = peak.x - snotter.x, dy = peak.y - snotter.y;
+  const l = Math.hypot(dx, dy);
+  const spritEnd = {
+    x: peak.x + dx / l * SPEC.spritOver, y: peak.y + dy / l * SPEC.spritOver,
+  };
+
+  return { tack, head, peak, corner, snotter, spritEnd, spritLen: l + SPEC.spritOver };
 }
 
 /**
- * Mast axis and tack position in the boat frame.  The mast steps on the
- * foredeck; the tack sits a little above the step at the gooseneck.
+ * Mast axis and tack position in the boat frame.  The mast passes
+ * through the mast thwart and steps on the floor; the tack (the boom's
+ * gooseneck) sits SPEC.tackHeight above the baseline.
  */
-export function mastFrame(deckYAtMast) {
+export function mastFrame(stepY) {
   const rake = SPEC.rigRake * D2R;
-  const base = new THREE.Vector3(SPEC.mastFromBow, deckYAtMast, 0);
+  const base = new THREE.Vector3(SPEC.mastFromBow, stepY, 0);
   const dir = new THREE.Vector3(Math.sin(rake), Math.cos(rake), 0);
-  const lower = Math.max(0.02, SPEC.tackHeight - deckYAtMast);
+  const lower = Math.max(0.02, (SPEC.tackHeight - stepY) / Math.cos(rake));
   const tack = base.clone().addScaledVector(dir, lower);
   return { rake, base, dir, lower, tack };
 }
@@ -103,10 +107,12 @@ const SAIL_T = 26;
 const BOOM_Z = 0.004;
 const SPRIT_HOOK_Z = 0.024; // the sprit's centreline where it hooks on
 const SPRIT_PEAK_Z = 0.016; // ... and at the peak, where the cloth is flat
-const SPRIT_R0 = 0.0179;    // spar radius at the hook
-const SPRIT_R1 = 0.0099;    // ... and at the peak
+const SPRIT_R0 = 0.016;     // spar radius at the heel
+const SPRIT_R1 = 0.0135;    // ... and at the peak
 const CLOTH = 0.006;        // half a skin, so the cloth lies over the spar
 const SPRIT_W = 0.17;       // how wide a band of cloth the sprit flattens
+const BRIDLE = [0.69, 1.26]; // bridle ends, m along the boom from the tack
+const BRIDLE_DROP = 0.09;    // the block hangs this far under the boom
 
 function leechPoint(corner, peak, t, hollow) {
   const dx = peak.x - corner.x, dy = peak.y - corner.y;
@@ -136,8 +142,8 @@ export function sailGeometry(corners, o = {}) {
   const pos = [], nor = [], uv = [], idx = [];
 
   // The sprit's trace across the face of the sail, in the same frame as
-  // the corners: it hooks on the mast below the tack and runs to the peak.
-  const spritA = { x: 0, y: -SPEC.spritHook };
+  // the corners: from the snotter on the mast to the peak.
+  const spritA = corners.snotter;
   const sbx = peak.x - spritA.x, sby = peak.y - spritA.y;
   const slen2 = sbx * sbx + sby * sby;
 
@@ -175,7 +181,7 @@ export function sailGeometry(corners, o = {}) {
       // leeward, both fading out at the leech so the edge stays on the
       // sprit.  The foot is laced into the boom, so it stays put.
       const chord = Math.hypot(R.x - L.x, R.y - L.y);
-      const draft = camber * (chord / SPEC.sprit) * env * belly * 2.4;
+      const draft = camber * (chord / 2.2) * env * belly * 2.4;
       const sag = luffSag * Math.sin(PI * t) * Math.pow(Math.max(0, 1 - s), 1.7);
       pz += draft + sag;
       py -= footSag * Math.sin(PI * s) * Math.pow(Math.max(0, 1 - t), 2.0);
@@ -355,13 +361,14 @@ function sparBetween(a, b, rA, rB, mat, z = 0) {
   return m;
 }
 
-export function createRig(corners = rigCorners(), frame = mastFrame(0.24)) {
-  const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.6 });
-  const carbon = new THREE.MeshStandardMaterial({ color: 0x2c2e32, roughness: 0.45, metalness: 0.2 });
+export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
+  // anodised aluminium spars, as on every current class rig
+  const wood = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.32, metalness: 0.75 });
+  const carbon = wood;
   const black = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.5 });
   const steel = new THREE.MeshStandardMaterial({ color: 0xbcc0c6, roughness: 0.28, metalness: 0.85 });
   const gold = new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.35, metalness: 0.7 });
-  wood.name = 'spar-wood'; carbon.name = 'spar-carbon'; black.name = 'rig-fitting';
+  wood.name = 'spar-aluminium'; black.name = 'rig-fitting';
   steel.name = 'rig-hardware'; gold.name = 'block-sheave';
 
   const group = new THREE.Group();   // at the tack, raked with the mast
@@ -384,13 +391,18 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.24)) {
   truck.position.y = SPEC.luff + SPEC.mastAboveHead;
   group.add(truck);
 
-  // gooseneck: a short stub from the mast to the tack
+  // gooseneck: a collar round the mast with the boom jaws on it
   const gooseneck = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.015, 0.015, frame.lower * 0.55, 10), steel);
+    new THREE.CylinderGeometry(SPEC.mastDia * 0.66, SPEC.mastDia * 0.66, 0.05, 16), black);
   gooseneck.name = 'Gooseneck';
-  gooseneck.position.set(-0.012, -frame.lower * 0.72, 0);
-  gooseneck.rotation.z = 0.16;
+  gooseneck.position.set(0, -0.005, 0);
   group.add(gooseneck);
+  // mast heel plug where it lands on the step
+  const heel = new THREE.Mesh(
+    new THREE.CylinderGeometry(SPEC.mastDia * 0.55, SPEC.mastDia * 0.6, 0.04, 14), black);
+  heel.name = 'Mast heel';
+  heel.position.set(0, -frame.lower + 0.02, 0);
+  group.add(heel);
 
   // ---- boom -------------------------------------------------------
   // The foot is laced into the boom, so the boom sits on the foot line and
@@ -408,18 +420,18 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.24)) {
   boomEnd.position.set(corners.corner.x, corners.corner.y, BOOM_Z);
   pivot.add(boomEnd);
 
-  // ---- sprit: from its hook on the mast to the peak ---------------
-  // on the windward face, laced to the leech, as on the class diagram
-  const hookPt = { x: 0, y: -SPEC.spritHook };
-  const sprit = sparBetween(hookPt, corners.peak,
-    SPRIT_R0, SPRIT_R1, wood, [SPRIT_HOOK_Z, SPRIT_PEAK_Z]);
+  // ---- sprit: from the snotter on the mast up to the peak ---------
+  // it lies across the leeward face of the sail and pushes the peak up
+  const spritTipZ = SPRIT_PEAK_Z;
+  const sprit = sparBetween(corners.snotter, corners.spritEnd,
+    SPRIT_R0, SPRIT_R1, wood, [SPRIT_HOOK_Z, spritTipZ]);
   sprit.name = 'Sprit';
   sprit.castShadow = true;
   pivot.add(sprit);
 
   const spritTip = new THREE.Mesh(new THREE.SphereGeometry(SPEC.spritDia * 0.58, 14, 10), black);
   spritTip.name = 'Sprit tip';
-  spritTip.position.set(corners.peak.x, corners.peak.y, SPRIT_PEAK_Z);
+  spritTip.position.set(corners.spritEnd.x, corners.spritEnd.y, spritTipZ);
   pivot.add(spritTip);
 
   // ---- sail -------------------------------------------------------
@@ -461,21 +473,46 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.24)) {
   headFit.position.set(corners.head.x, corners.head.y, 0);
   pivot.add(headFit);
 
-  // ---- mainsheet block on the boom end ----------------------------
+  // ---- mainsheet bridle and block ---------------------------------
+  // A rope bridle under the boom; the mainsheet block rides on it,
+  // right above the ratchet block on the centre thwart.
+  const fx = corners.corner.x / SPEC.foot, fy = corners.corner.y / SPEC.foot;
+  const onBoom = (d, drop = 0) => ({ x: fx * d + fy * drop, y: fy * d - fx * drop });
+  const b0 = onBoom(BRIDLE[0], SPEC.boomDia / 2), b1 = onBoom(BRIDLE[1], SPEC.boomDia / 2);
+  const bm = onBoom((BRIDLE[0] + BRIDLE[1]) / 2, BRIDLE_DROP);
+  const bridleCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(b0.x, b0.y, BOOM_Z),
+    new THREE.Vector3((b0.x + bm.x) / 2, (b0.y + bm.y) / 2 - 0.01, BOOM_Z),
+    new THREE.Vector3(bm.x, bm.y + 0.03, BOOM_Z),
+    new THREE.Vector3((b1.x + bm.x) / 2, (b1.y + bm.y) / 2 - 0.01, BOOM_Z),
+    new THREE.Vector3(b1.x, b1.y, BOOM_Z),
+  ]);
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0xe9e4d4, roughness: 0.95 });
+  ropeMat.name = 'rope';
+  const bridle = new THREE.Mesh(new THREE.TubeGeometry(bridleCurve, 30, 0.003, 6, false), ropeMat);
+  bridle.name = 'Mainsheet bridle';
+  pivot.add(bridle);
+
   const block = new THREE.Group();
   block.name = 'Boom block';
-  const shell = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.085, 0.032), black);
-  const sheave = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.014, 16), gold);
+  const shell = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.06, 0.026), black);
+  const sheave = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.03, 16), gold);
   sheave.rotation.x = PI / 2;
   block.add(shell, sheave);
-  block.position.set(corners.corner.x, corners.corner.y - 0.06, BOOM_Z);
+  block.position.set(bm.x, bm.y, BOOM_Z);
   pivot.add(block);
+  corners.boomBlock = { x: bm.x, y: bm.y - 0.03 };
 
-  // sprit tensioner: a hook on the mast just below the tack
-  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.006, 8, 16, PI * 1.4), steel);
-  hook.position.set(-0.028, -frame.lower - 0.10, 0);
-  hook.rotation.y = PI / 2;
-  group.add(hook);
+  // ---- snotter: the sprit's heel in a rope loop on the mast -------
+  const snot = new THREE.Mesh(new THREE.TorusGeometry(SPEC.mastDia * 0.62, 0.005, 6, 18), ropeMat);
+  snot.name = 'Snotter';
+  snot.rotation.x = PI / 2;
+  snot.position.set(0, corners.snotter.y, 0);
+  group.add(snot);
+  const heelFit = new THREE.Mesh(new THREE.SphereGeometry(SPEC.spritDia * 0.62, 12, 10), black);
+  heelFit.name = 'Sprit heel';
+  heelFit.position.set(corners.snotter.x + 0.01, corners.snotter.y, SPRIT_HOOK_Z);
+  pivot.add(heelFit);
 
   // ---- mainsheet line (updated every frame) -----------------------
   const SHEET_PTS = 26;
@@ -524,7 +561,8 @@ export function updateRig(rig, p = {}) {
 }
 
 /**
- * Rebuild the mainsheet from the boom-end block to the cleat.  The line
+ * Rebuild the mainsheet from the bridle block down to the ratchet block
+ * on the centre thwart.  The line
  * is a child of the boat group; `cleatBoat` is in boat coordinates.
  */
 export function updateMainsheet(rig, cleatBoat) {
@@ -532,8 +570,8 @@ export function updateMainsheet(rig, cleatBoat) {
   const arr = attr.array;
   const n = attr.count;
 
-  const a = new THREE.Vector3(rig.corners.corner.x, rig.corners.corner.y - 0.10,
-    rig.BOOM_Z ?? 0.004);
+  const bb = rig.corners.boomBlock;
+  const a = new THREE.Vector3(bb.x, bb.y, rig.BOOM_Z ?? 0.004);
   rig.pivot.localToWorld(a);
   if (rig.sheet.parent) rig.sheet.parent.worldToLocal(a);
   const b = cleatBoat;
@@ -543,7 +581,7 @@ export function updateMainsheet(rig, cleatBoat) {
   const eased = Math.min(1, Math.max(0, rig.boomOut ?? 0.4));
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1);
-    const slack = 0.03 + 0.09 * eased;
+    const slack = 0.01 + 0.05 * eased;
     const sag = Math.sin(PI * t) * slack;
     arr[i * 3] = a.x + (b.x - a.x) * t;
     arr[i * 3 + 1] = a.y + (b.y - a.y) * t - sag;
