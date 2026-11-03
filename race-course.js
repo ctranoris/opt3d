@@ -30,9 +30,9 @@ const D2R = Math.PI / 180;
 // upwind, rounded to starboard; 3P on the right, rounded to port), and a
 // short beat up to the finish.
 const PLAN = {
-  startHalf: 14,
+  startHalf: 20,
   startAhead: 6,               // start line this far upwind of the boat
-  slots: 5,                    // boats in the row below the line; ours in the middle
+  slots: 13,                   // boats in the row below the line; ours in the middle
   marks: [
     { label: '1', at: [84, 0] },
     { label: '2', at: [70, -56] },
@@ -235,7 +235,9 @@ export function createCourse() {
     // phase: 'countdown' -> 'started' (gun gone, line not yet crossed)
     //   -> 'racing' -> 'done'; or 'pre' (no countdown: the clock starts
     //   at the line) -> 'racing' -> 'done'
-    race: { phase: 'pre', count: COUNTDOWN, ocs: false, next: 0, time: 0, best: null },
+    // clock: seconds since the gun (or since the course was laid, with no
+    // countdown), the same for every boat; finish: ours on that clock
+    race: { phase: 'pre', count: COUNTDOWN, ocs: false, next: 0, time: 0, best: null, clock: 0, finish: null },
     slots: PLAN.slots,
     slotDepth: PLAN.startAhead,
     _prev: null,
@@ -280,7 +282,7 @@ export function createCourse() {
         m(1, 4, 0), m(1, 3, -3), m(1, 0, -5),    // above 2 and round its outside
         g(2, 0), g(-3, 0),                       // down through the middle of the gate
       ];
-      const over = [at(PLAN.finish[0] + 3, PLAN.finish[1])];   // just across the finish
+      const over = [at(PLAN.finish[0] + 1, PLAN.finish[1])];   // just across the finish
       this.routes = {
         P: [...common, m(3, -4, 1), m(3, 0, 5), ...over],     // left turn round 3P
         S: [...common, m(2, -4, -1), m(2, 0, -5), ...over],   // right turn round 3S
@@ -302,6 +304,8 @@ export function createCourse() {
       this.race.phase = countdown ? 'countdown' : 'pre';
       this.race.count = COUNTDOWN;
       this.race.ocs = false;
+      this.race.clock = 0;
+      this.race.finish = null;
       this.race.next = 0;
       this.race.time = 0;
       this._prev = null;
@@ -311,6 +315,12 @@ export function createCourse() {
     legPoint(i) {
       const ms = legs[i].marks.map((k) => marks[k].userData.w);
       return ms.length === 1 ? ms[0] : ms[0].clone().add(ms[1]).multiplyScalar(0.5);
+    },
+
+    /** Did a boat going from water point p0 to p1 cross the finish line upwind? */
+    crossesFinish(p0, p1) {
+      return !!crossing(p0, p1, this.finish[0], this.finish[1]) &&
+        (p1.x - p0.x) * this.up.x + (p1.y - p0.y) * this.up.y > 0;
     },
 
     /** The fleet's waypoints round the course, by gate mark ('S' or 'P'). */
@@ -346,6 +356,7 @@ export function createCourse() {
       const p1 = boatW.clone();
       const p0 = this._prev || p1;
       this._prev = p1;
+      if (R.phase !== 'countdown') R.clock += dt;
       if (R.phase === 'pre') {
         // across the line going upwind starts the clock
         const s = crossing(p0, p1, this.start[0], this.start[1]);
@@ -374,6 +385,7 @@ export function createCourse() {
               (leg.gate && crossing(p0, p1, ms[0], ms[1]))) R.next++;
         } else if (crossing(p0, p1, this.finish[0], this.finish[1])) {
           R.phase = 'done';
+          R.finish = R.clock;
           if (R.best == null || R.time < R.best) R.best = R.time;
         }
       }

@@ -241,15 +241,16 @@ seven camera presets.
 | **Draft** | how deep the sail is foiled |
 | **Auto sail** | puts the boom out to leeward at the right angle for the wind, gybing across when the wind changes side |
 | **Sea motion** | float her on the waves |
+| **Country / Sail no.** | the national letters and sail number on your sail (default GRE 1060); remembered in a cookie (`opt3d_sail`, one year) |
 | **Part labels** | name 25 parts with leader lines |
 | **Turntable** | slowly turns the boat's heading (15°/s); the sail trims itself if Auto sail is on |
 | **Wireframe / Water / Compass & wind** | as they say |
-| **Sailor** | a young sailor in each boat, on the windward side (opposite the boom), hiking harder as she heels; left out of the `.glb` export |
+| **Sailor** | a young sailor in each boat, on the windward side (opposite the boom), hiking harder as she heels; the girls in the fleet have longer hair with a ponytail that swings under gravity; left out of the `.glb` export |
 | **Islands** | four low, hazy islands far off on the horizon (640–820 m away, rising about 1° above it), with open sea between them (`mountains.js`) |
 | **Sound** | recordings from `sounds/` (`sound.js`): water that rises with boat speed, the sail flapping when it luffs, wind in the rig, the mainsheet running when the boom moves, and the sail filling after a tack or gybe; starts on the first click or key press, fades as the camera pulls back |
 | **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys |
-| **Fleet** | four more Optimists (GRE 2471, 3305, 1888, 5120) racing round the marks; turns the course on |
-| **Re-lay course** | lays the course again for the wind and position you have now and starts a 10 s countdown: every boat, yours in the middle, is lined up 6 m below the start line, head to wind. A horn sounds at 10 s, a beep each of the last 5 seconds, and a long horn at the gun |
+| **Fleet** | twelve more Optimists racing round the marks: GRE 1062, 105, 1054 and 1055 (girls), and 1057, 1058, 128, 3153, 1052, 2737, 2828 and 2628 (boys); turns the course on |
+| **Re-lay course** | lays the course again for the wind and position you have now and starts a 10 s countdown: all 13 boats, yours in the middle, are lined up about 3 m apart, 6 m below the 40 m start line, head to wind. A horn sounds at 10 s, a beep each of the last 5 seconds, and a long horn at the gun |
 | **← / → or A / D** | steer: turns the bow at 40°/s, and the camera swings round with her |
 
 **Drag the sail** in the viewport to swing the boom to any angle on either
@@ -270,7 +271,15 @@ Worlds course (`init_assets/example_course.png`):
 
 A mark counts once you pass within 7 m of it; the next one (both, for the
 gate) has a pulsing green ring. The panel at the top shows the next mark, its
-distance and bearing, the elapsed time and your best time. The course
+distance and bearing, the elapsed time and your best time.
+
+With the fleet on, a **Finish** ranking appears at the top right as soon as
+the first boat crosses the finish line. It lists everyone who has finished,
+in order, by the time since the gun (or since the course was laid, with no
+countdown). The winner's time is shown in full and the others as the gap
+behind the winner. Your row is highlighted, and the race panel shows your
+place, for example "6th of 13". The ranking is cleared when you re-lay the
+course. The course
 (start 12 m upwind of the boat):
 
 | | metres upwind of the start | metres right (looking upwind) |
@@ -297,8 +306,8 @@ The fleet sails the same small model as your boat. Each boat follows a
 route of waypoints: up the right of mark 1 and round it to port on the
 outside, over the top of mark 2 and round its outside, down through the
 middle of the gate, round 3P (to port) or 3S (to starboard, every other
-boat) below it, then a beat up across the finish line, where it stops
-head to wind. It points at its next waypoint, and beats at 60° to the
+boat) below it, then a beat up across the finish line, where its time
+is taken for the ranking and it stops head to wind. It points at its next waypoint, and beats at 60° to the
 wind (about the best upwind VMG for the viewer's speed polar) when the
 waypoint is too close to the wind to point at. It tacks on the layline,
 with the odd tack up the middle. Each boat leaves its own wake, and

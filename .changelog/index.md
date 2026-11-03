@@ -4,6 +4,17 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-03
 
+- [Finish ranking](20261103_2036_finish-ranking.md) —
+  race clock from the gun; fleet boats timed across the finish line; a
+  Finish panel lists the finishers in order with ours highlighted.
+
+- [Twelve named sailors, ponytails, sail number remembered](20261103_1945_fleet-sailors-cookie.md) —
+  default sail GRE 1060; 12 fleet boats with the given numbers, the girls
+  with long hair and a ponytail; 13-boat start row; sail marks kept in a cookie.
+
+- [Commit and push: fleet route and longer course](20261103_1920_commit-and-push-fleet-route.md) —
+  pushed 6881406 to main.
+
 - [Fleet rounds the marks properly; bigger course](20261103_1915_fleet-rounds-marks.md) —
   the fleet rounds 1 and 2 outside, goes through the gate round 3S/3P and
   finishes; the course is about 40% longer.

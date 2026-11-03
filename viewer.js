@@ -795,6 +795,7 @@ function animate() {
   if (state.labels) drawLabels();
   updateReadout();
   updateRaceHud();
+  updateRanking();
   requestAnimationFrame(animate);
 }
 
@@ -861,10 +862,47 @@ function updateRaceHud() {
         `<span class="${i < r.next ? 'done' : i === r.next ? 'cur' : ''}">${n}</span>`).join('')}` +
       `<span class="${r.next >= r.legs.length ? 'cur' : ''}">F</span></div>`;
   } else {
-    html = `<div class="big">Finished in ${fmtTime(r.time)}</div>` +
+    const place = state.fleet ? ranking().findIndex((e) => e.me) + 1 : 0;
+    html = `<div class="big">Finished in ${fmtTime(r.time)}` +
+      (place ? ` &middot; ${ordinal(place)} of ${fleet.boats.length + 1}` : '') + '</div>' +
       (r.best != null ? `best ${fmtTime(r.best)} &middot; ` : '') + 'Re-lay the course to race again';
   }
   if (raceHud._html !== html) { raceHud.innerHTML = html; raceHud._html = html; }
+}
+
+/* ---- finish ranking ---- */
+
+const rankBox = document.getElementById('rank');
+const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+
+/** Everyone who has finished, first first, on the race clock. */
+function ranking() {
+  const out = fleet.boats.filter((s) => s.finish != null)
+    .map((s) => ({ name: `${s.marks.country} ${s.marks.number}`, t: s.finish, me: false }));
+  if (course.race.finish != null) {
+    out.push({
+      name: `${ui.sailCountry.value.toUpperCase()} ${ui.sailNumber.value}`.trim(),
+      t: course.race.finish, me: true,
+    });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/** The ranking panel: shown once the first boat is home. */
+function updateRanking() {
+  if (!rankBox) return;
+  const list = state.course && state.fleet ? ranking() : [];
+  if (!list.length) { rankBox.style.display = 'none'; rankBox._html = ''; return; }
+  const total = fleet.boats.length + 1;
+  const t0 = list[0].t;
+  const rows = list.map((e, i) =>
+    `<tr class="${e.me ? 'me' : ''} ${i === 0 ? 'p1' : ''}"><td class="pos">${i + 1}</td>` +
+    `<td class="who">${e.name}${e.me ? ' (you)' : ''}</td>` +
+    `<td class="t">${i === 0 ? fmtTime(e.t) : '+' + (e.t - t0).toFixed(1) + ' s'}</td></tr>`).join('');
+  const left = total - list.length;
+  const html = `<div class="ttl">Finish</div><table>${rows}</table>` +
+    (left ? `<div class="more">${left} still racing</div>` : '');
+  if (rankBox._html !== html) { rankBox.innerHTML = html; rankBox._html = html; rankBox.style.display = 'block'; }
 }
 
 /**
@@ -1224,6 +1262,23 @@ function measureSail() {
  * UI
  * ------------------------------------------------------------------ */
 
+/* The sail marks are kept in a cookie, "opt3d_sail=GRE/1060". */
+const SAIL_COOKIE = 'opt3d_sail';
+function readSailCookie() {
+  try {
+    const m = document.cookie.match(new RegExp('(?:^|; )' + SAIL_COOKIE + '=([^;]*)'));
+    if (!m) return null;
+    const [country = '', number = ''] = decodeURIComponent(m[1]).split('/');
+    return { country: country.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3), number: number.replace(/[^0-9A-Za-z-]/g, '').slice(0, 6) };
+  } catch { return null; }
+}
+function writeSailCookie(country, number) {
+  try {
+    const v = encodeURIComponent(`${country.toUpperCase().replace(/[^A-Z]/g, '')}/${number.replace(/[^0-9A-Za-z-]/g, '')}`);
+    document.cookie = `${SAIL_COOKIE}=${v}; max-age=${365 * 24 * 3600}; path=/; SameSite=Lax`;
+  } catch { /* cookies blocked: just don't remember */ }
+}
+
 const ui = {};
 function bindUI() {
   const $ = (id) => document.getElementById(id);
@@ -1242,6 +1297,19 @@ function bindUI() {
       number: ui.sailNumber.value.replace(/[^0-9A-Za-z-]/g, ''),
     });
   };
+  // remembered in a cookie for a year
+  const saved = readSailCookie();
+  if (saved) {
+    if (saved.country) ui.sailCountry.value = saved.country;
+    if (saved.number) ui.sailNumber.value = saved.number;
+    applyMarks();
+  }
+  const remember = () => writeSailCookie(ui.sailCountry.value, ui.sailNumber.value);
+  ui.sailCountry.addEventListener('change', remember);
+  ui.sailNumber.addEventListener('change', remember);
+  ui.sailCountry.addEventListener('input', remember);
+  ui.sailNumber.addEventListener('input', remember);
+
   ui.sailCountry.addEventListener('input', () => {
     const p = ui.sailCountry.selectionStart;
     ui.sailCountry.value = ui.sailCountry.value.toUpperCase();

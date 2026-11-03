@@ -270,7 +270,7 @@ export function sailGeometry(corners, o = {}) {
  * ------------------------------------------------------------------ */
 
 /** The printed marks: national letters over the sail number. */
-export const SAIL_MARKS = { country: 'GRE', number: '1062' };
+export const SAIL_MARKS = { country: 'GRE', number: '1060' };
 
 const TEX_X0 = -0.06;   // rig-frame metres at texture u = 0 ...
 const TEX_Y0 = -0.06;   // ... and v = 0

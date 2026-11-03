@@ -61,12 +61,20 @@ function ik(root, target, l1, l2, pole, mid, end) {
 const _ik = new THREE.Vector3(), _ip = new THREE.Vector3();
 
 const JACKETS = [0xe8412c, 0xf5c518, 0x1f6fd1, 0x2fa84f, 0xf07c1b, 0xd6336c];
+export const HAIR = [0x3b2414, 0x8a5a2b, 0xc9a25e, 0x1c1410];
+
+// the ponytail's profile, from the hair tie down to the tip (radius, drop)
+const TAIL = [[0, 0], [0.018, 0], [0.026, 0.03], [0.03, 0.07], [0.026, 0.13], [0.016, 0.19], [0.005, 0.23], [0, 0.235]]
+  .map(([r, y]) => new THREE.Vector2(r, -y));
 
 /**
- * Build a sailor.  `jacket` is the buoyancy aid's colour.
+ * Build a sailor.  `jacket` is the buoyancy aid's colour.  With
+ * `ponytail`, longer hair (colour `hair`) shows under the cap down to the
+ * neck, and a ponytail comes out of the back of the cap and swings.
  * Returns { group, update(opts) }.
  */
-export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1b2333 } = {}) {
+export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1b2333,
+  ponytail = false, hair = HAIR[0] } = {}) {
   const group = new THREE.Group();
   group.name = 'Sailor';
 
@@ -77,6 +85,7 @@ export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1
     cap: new THREE.MeshStandardMaterial({ color: cap, roughness: 0.6 }),
     boot: new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.8 }),
     rope: new THREE.MeshStandardMaterial({ color: 0x2d5fa8, roughness: 0.8 }),
+    hair: new THREE.MeshStandardMaterial({ color: hair, roughness: 0.55, side: THREE.DoubleSide }),
   };
   const add = (geo, mat, name) => {
     const m = new THREE.Mesh(geo, mat);
@@ -105,6 +114,25 @@ export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1
   capG.add(crown, peak);
   capG.name = 'Cap';
   group.add(capG);
+
+  // long hair: a shell round the back and sides of the head below the
+  // cap, down to the nape, and a ponytail through the back of the cap
+  let pony = null;
+  if (ponytail) {
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.1, 20, 12, Math.PI - 0.55, Math.PI + 1.1, Math.PI * 0.42, Math.PI * 0.4)
+      .scale(0.97, 1.12, 1.02), M.hair);
+    shell.position.set(0, -0.004, -0.004);
+    shell.name = 'Hair';
+    pony = new THREE.Group();
+    pony.name = 'Ponytail';
+    pony.position.set(0, 0.03, -0.088);
+    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.017, 0.006, 6, 14).rotateX(Math.PI / 2), M.cap);
+    tie.position.y = -0.008;
+    const lock = new THREE.Mesh(new THREE.LatheGeometry(TAIL, 12).scale(1, 1, 0.8), M.hair);
+    pony.add(tie, lock);
+    shell.castShadow = lock.castShadow = true;
+    capG.add(shell, pony);
+  }
 
   const legs = [0, 1].map((i) => ({
     thigh: capsule(0.062, L.thigh - 0.1, M.suit, 'Thigh'),
@@ -195,6 +223,7 @@ export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1
     head.quaternion.setFromRotationMatrix(basis);
     capG.position.copy(H);
     capG.quaternion.copy(head.quaternion);
+    if (pony) swing(t);
 
     // legs: feet hooked under the strap (it runs from the centre thwart
     // down to the floor aft), or on the floor while crossing
@@ -276,6 +305,20 @@ export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1
   }
 
   /** Put the tiller extension back to rest (sailor hidden). */
+  // The ponytail hangs down (whatever the heel and the head's tilt), kept
+  // off the back of the head, and swings a little with the boat.
+  const _q = new THREE.Quaternion(), _down = new THREE.Vector3(), DOWN = new THREE.Vector3(0, -1, 0);
+  function swing(t) {
+    group.updateWorldMatrix(true, false);
+    group.getWorldQuaternion(_q).multiply(capG.quaternion).invert();
+    _down.set(0, -1, 0).applyQuaternion(_q);
+    _down.x += 0.18 * Math.sin(t * 1.7) + 0.08 * Math.sin(t * 3.1);
+    _down.z += -0.35 + 0.1 * Math.sin(t * 2.3);
+    _down.z = Math.min(_down.z, -0.3);
+    _down.y = Math.min(_down.y, 0.2);
+    pony.quaternion.setFromUnitVectors(DOWN, _down.normalize());
+  }
+
   function release(boat) {
     const ext = boat && boat.rudder && boat.rudder.extension;
     if (ext) ext.quaternion.copy(ext.userData.rest);

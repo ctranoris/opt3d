@@ -145,6 +145,26 @@
   #race .legs span.cur { background: #4cff9a; color: #04131d; font-weight: 700; }
   @media (max-width: 640px) { #race { top: auto; bottom: 70px; } }
 
+  /* ---------- finish ranking ---------- */
+  #rank {
+    display: none; position: absolute; top: 14px; right: 14px; min-width: 190px;
+    max-height: calc(100% - 120px); overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--panel-line); border-radius: 12px;
+    padding: 8px 12px 9px; pointer-events: none;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  #rank .ttl { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+  #rank table { border-collapse: collapse; width: 100%; }
+  #rank td { padding: 2px 4px; white-space: nowrap; }
+  #rank td.pos { text-align: right; color: var(--muted); width: 1.6em; }
+  #rank td.who { color: var(--text); }
+  #rank td.t { text-align: right; }
+  #rank tr.me td { color: #4cff9a; font-weight: 700; }
+  #rank tr.p1 td.pos { color: #f4c20d; }
+  #rank .more { margin-top: 4px; font-size: 11px; }
+  @media (max-width: 640px) { #rank { top: auto; bottom: 150px; right: 8px; } }
+
   /* ---------- boot / error ---------- */
   #boot {
     position: absolute; inset: 0; display: grid; place-items: center;
@@ -214,13 +234,13 @@
           <label for="sailCountry">Country</label>
           <input id="sailCountry" class="txt" type="text" maxlength="3"
                  spellcheck="false" autocomplete="off" value="GRE"
-                 title="National letters, e.g. GRE">
+                 title="National letters, e.g. GRE (remembered in a cookie)">
         </div>
         <div class="row">
           <label for="sailNumber">Sail no.</label>
           <input id="sailNumber" class="txt" type="text" maxlength="6"
-                 inputmode="numeric" spellcheck="false" autocomplete="off" value="1062"
-                 title="Sail number, e.g. 1062">
+                 inputmode="numeric" spellcheck="false" autocomplete="off" value="1060"
+                 title="Sail number, e.g. 1060 (remembered in a cookie)">
         </div>
       </div>
 
@@ -276,6 +296,7 @@
 
   <div id="readout"></div>
   <div id="race"></div>
+  <div id="rank"></div>
 
   <div id="boot">
     <div class="card">

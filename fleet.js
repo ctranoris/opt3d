@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { SPEC } from './model/opti-core.js';
 import { createBoat, makeMaterials } from './model/opti-boat.js';
 import { updateRig, updateMainsheet, sailTexture } from './model/opti-rig.js';
-import { createSailor, JACKETS } from './sailor.js';
+import { createSailor, JACKETS, HAIR } from './sailor.js';
 
 const D2R = Math.PI / 180;
 const MID = 1.15;
@@ -33,11 +33,20 @@ const NOGO = BEAT - 2;
 const REACH = 2.5;        // metres: close enough to call a waypoint reached
 const TURN = 30;          // deg/s
 
+// The other sailors; `girl` ones have long hair in a ponytail.
 const ENTRIES = [
-  { country: 'GRE', number: '2471' },
-  { country: 'GRE', number: '3305' },
-  { country: 'GRE', number: '1888' },
-  { country: 'GRE', number: '5120' },
+  { country: 'GRE', number: '1062', girl: true },
+  { country: 'GRE', number: '1057' },
+  { country: 'GRE', number: '1058' },
+  { country: 'GRE', number: '128' },
+  { country: 'GRE', number: '105', girl: true },
+  { country: 'GRE', number: '3153' },
+  { country: 'GRE', number: '1052' },
+  { country: 'GRE', number: '1054', girl: true },
+  { country: 'GRE', number: '2737' },
+  { country: 'GRE', number: '2828' },
+  { country: 'GRE', number: '2628' },
+  { country: 'GRE', number: '1055', girl: true },
 ];
 export const FLEET_N = ENTRIES.length;
 
@@ -47,7 +56,7 @@ export function createFleet() {
   const boats = ENTRIES.map((marks, i) => {
     const b = createBoat(makeMaterials());
     const old = b.rig.materials.sailMat.map;
-    b.rig.materials.sailMat.map = sailTexture(marks, b.rig.corners);
+    b.rig.materials.sailMat.map = sailTexture({ country: marks.country, number: marks.number }, b.rig.corners);
     b.rig.materials.sailMat.needsUpdate = true;
     if (old) old.dispose();
 
@@ -59,16 +68,20 @@ export function createFleet() {
     holder.updateMatrixWorld(true);
     const toRig = new THREE.Matrix4().copy(b.rig.group.matrix).invert();
     b.cleatRig = b.cleatLocal.clone().applyMatrix4(toRig);
-    const sailor = createSailor({ jacket: JACKETS[(i + 1) % JACKETS.length], cap: i % 2 ? 0x1b2333 : 0xffffff });
+    const sailor = createSailor({
+      jacket: JACKETS[(i + 1) % JACKETS.length], cap: i % 2 ? 0x1b2333 : 0xffffff,
+      ponytail: !!marks.girl, hair: HAIR[i % HAIR.length],
+    });
     b.group.add(sailor.group);
     return {
       b, holder, marks, sailor,
       w: new THREE.Vector2(), heading: 0, speed: 0, boom: 0, fill: 1, heel: 0,
-      tgt: 0, gate: 'P', done: false, tack: 0, tackTime: 0, tackAfter: 25, perf: 1, phase: i * 2.3,
+      tgt: 0, gate: 'P', lane: 0, finish: null, prev: new THREE.Vector2(), done: false, tack: 0, tackTime: 0, tackAfter: 25, perf: 1, phase: i * 2.3,
     };
   });
 
   const fl = new THREE.Vector3();
+  const _fin = new THREE.Vector2(), _lane = new THREE.Vector2();
 
   return {
     group, boats,
@@ -90,8 +103,9 @@ export function createFleet() {
           s.heading = (windFromDeg + s.tack * BEAT + 360) % 360;
           s.speed = 0.06; s.boom = 0; s.fill = 1; s.heel = 0;
         }
-        s.tgt = 0; s.tackTime = 0; s.done = false;
+        s.tgt = 0; s.tackTime = 0; s.done = false; s.finish = null;
         s.gate = i % 2 ? 'S' : 'P';      // which gate mark to round
+        s.lane = ((i % 7) - 3) * 1.2;     // where along the finish line it crosses, metres
         s.tackAfter = 18 + 22 * Math.random();
         s.perf = 0.86 + 0.14 * Math.random();
       });
@@ -109,16 +123,18 @@ export function createFleet() {
         // next waypoint: reached when close, or when sailed past it
         const route = course.route(s.gate);
         let tg = route[Math.min(s.tgt, route.length - 1)];
-        if (!s.done) {
+        // (the last one, on the finish line, is only done by crossing the line)
+        if (!s.done && s.tgt < route.length - 1) {
           const from = s.tgt ? route[s.tgt - 1] : null;
           const d = s.w.distanceTo(tg);
           const past = from && d < 8 &&
             (s.w.x - tg.x) * (tg.x - from.x) + (s.w.y - tg.y) * (tg.y - from.y) > 0;
           if (d < REACH || past) {
-            if (++s.tgt >= route.length) s.done = true;   // across the finish
-            else tg = route[s.tgt];
+            tg = route[++s.tgt];
           }
         }
+        // spread the fleet along the finish line, so they don't all stop in one spot
+        if (s.tgt >= route.length - 1) tg = _fin.copy(route[route.length - 1]).add(_lane.set(-course.up.y, course.up.x).multiplyScalar(s.lane));
         const brg = Math.atan2(tg.x - s.w.x, -(tg.y - s.w.y)) / D2R;
         const rel = wrap180(brg - windFromDeg);
         let want;
@@ -164,8 +180,15 @@ export function createFleet() {
 
         // ---- make way ----
         const ms = s.speed * 18 * 0.5144;
+        s.prev.copy(s.w);
         s.w.x += bx * ms * dt;
         s.w.y += bz * ms * dt;
+        // finished: across the line upwind, on the last leg, on the race clock;
+        // then it stops head to wind just over the line
+        if (!s.done && s.tgt >= route.length - 1 && course.crossesFinish(s.prev, s.w)) {
+          s.finish = course.race.clock;
+          s.done = true;
+        }
 
         // ---- float ----
         const aft = SPEC.loa - MID;
