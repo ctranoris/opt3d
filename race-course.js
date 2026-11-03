@@ -8,9 +8,11 @@
  *   Start - 1 - 2 - 3S/3P - Finish     (marks rounded to port; the gate
  *                                       either way round)
  *
- * The race is timed: cross the start line going upwind, round 1 and 2,
- * pass through (or round either mark of) the gate, then beat up and cross
- * the finish line.
+ * The race starts with a 10 s countdown, the boats held head to wind in a
+ * row below the start line.  The clock starts at the gun; cross the start
+ * line going upwind, round 1 and 2, pass through (or round either mark of)
+ * the gate, then beat up and cross the finish line.  Over the line before
+ * the gun (OCS), a boat has to dip back below it before it can start.
  *
  * Everything here lives in water coordinates (x east, z south, metres),
  * fixed to the sea.  The viewer keeps its own boat in the middle of the
@@ -29,7 +31,8 @@ const D2R = Math.PI / 180;
 // short beat up to the finish.
 const PLAN = {
   startHalf: 12,
-  startAhead: 12,              // start line this far upwind of the boat
+  startAhead: 6,               // start line this far upwind of the boat
+  slots: 5,                    // boats in the row below the line; ours in the middle
   marks: [
     { label: '1', at: [60, 0] },
     { label: '2', at: [50, -40] },
@@ -42,6 +45,7 @@ const PLAN = {
   finishHalf: 6,
 };
 export const ROUND_RADIUS = 7;   // pass this close to a mark to round it
+export const COUNTDOWN = 10;     // seconds from laying the course to the gun
 
 const MARK_COL = 0xd8231b;
 const START_COL = 0xff6a1a;
@@ -227,14 +231,19 @@ export function createCourse() {
     finishMid: new THREE.Vector2(),
     up: new THREE.Vector2(),
     // race state
-    race: { phase: 'pre', next: 0, time: 0, best: null },
+    // phase: 'countdown' -> 'started' (gun gone, line not yet crossed)
+    //   -> 'racing' -> 'done'; or 'pre' (no countdown: the clock starts
+    //   at the line) -> 'racing' -> 'done'
+    race: { phase: 'pre', count: COUNTDOWN, ocs: false, next: 0, time: 0, best: null },
+    slots: PLAN.slots,
+    slotDepth: PLAN.startAhead,
     _prev: null,
 
     /**
      * Lay the course for the wind, ahead of `p0` (the boat's position in
      * water coordinates), and reset the race.
      */
-    layout(p0, windFromDeg) {
+    layout(p0, windFromDeg, countdown = true) {
       const a = windFromDeg * D2R;
       const u = new THREE.Vector2(Math.sin(a), -Math.cos(a));   // upwind
       const r = new THREE.Vector2(Math.cos(a), Math.sin(a));    // right, looking upwind
@@ -258,11 +267,22 @@ export function createCourse() {
       setLine(startLine, this.start[0], this.start[1]);
       setLine(finishLine, this.finish[0], this.finish[1]);
       this.laid = true;
-      this.reset();
+      this.reset(countdown);
     },
 
-    reset() {
-      this.race.phase = 'pre';
+    /** Water position of slot `i` of the row below the start line. */
+    slot(i) {
+      const [a, b] = this.start;
+      const f = (i + 0.5) / PLAN.slots;
+      return new THREE.Vector2(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
+        .addScaledVector(this.up, -PLAN.startAhead);
+    },
+
+    /** Restart the race: with a countdown, or ('pre') start whenever. */
+    reset(countdown = true) {
+      this.race.phase = countdown ? 'countdown' : 'pre';
+      this.race.count = COUNTDOWN;
+      this.race.ocs = false;
       this.race.next = 0;
       this.race.time = 0;
       this._prev = null;
@@ -308,6 +328,20 @@ export function createCourse() {
         // across the line going upwind starts the clock
         const s = crossing(p0, p1, this.start[0], this.start[1]);
         if (s && p1.clone().sub(p0).dot(this.up) > 0) { R.phase = 'racing'; R.next = 0; R.time = 0; }
+      } else if (R.phase === 'countdown' || R.phase === 'started') {
+        // across the line: upwind before the gun is over early, back down
+        // clears it; upwind after the gun (and not OCS) is a start
+        const up = crossing(p0, p1, this.start[0], this.start[1])
+          ? Math.sign(p1.clone().sub(p0).dot(this.up)) : 0;
+        if (R.phase === 'countdown') {
+          if (up > 0) R.ocs = true; else if (up < 0) R.ocs = false;
+          R.count -= dt;
+          if (R.count <= 0) { R.count = 0; R.phase = 'started'; R.time = 0; }
+        } else {
+          R.time += dt;
+          if (up < 0) R.ocs = false;
+          else if (up > 0 && !R.ocs) { R.phase = 'racing'; R.next = 0; }
+        }
       } else if (R.phase === 'racing') {
         R.time += dt;
         if (R.next < legs.length) {
@@ -324,7 +358,7 @@ export function createCourse() {
 
       // where to go next, and the ring that shows it
       let goal;
-      if (R.phase === 'pre') goal = this.start[0].clone().add(this.start[1]).multiplyScalar(0.5);
+      if (R.phase === 'pre' || R.phase === 'countdown' || R.phase === 'started') goal = this.start[0].clone().add(this.start[1]).multiplyScalar(0.5);
       else if (R.phase === 'racing') goal = R.next < legs.length ? this.legPoint(R.next) : this.finishMid;
       else goal = null;
       const lit = R.phase === 'racing' && R.next < legs.length ? legs[R.next].marks : [];
@@ -345,7 +379,7 @@ export function createCourse() {
       const label = R.next < legs.length
         ? (legs[R.next].gate ? `Gate ${legs[R.next].marks.map((i) => PLAN.marks[i].label).join(' / ')}` : `Mark ${legs[R.next].name}`)
         : 'Finish';
-      return { phase: R.phase, next: R.next, legs: legs.map((l) => l.name), label, time: R.time, best: R.best, dist, brg };
+      return { phase: R.phase, count: R.count, ocs: R.ocs, next: R.next, legs: legs.map((l) => l.name), label, time: R.time, best: R.best, dist, brg };
     },
   };
   return course;

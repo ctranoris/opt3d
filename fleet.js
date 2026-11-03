@@ -73,16 +73,23 @@ export function createFleet() {
   return {
     group, boats,
 
-    /** Put the fleet on the line, below the start, heading for mark 1. */
+    /**
+     * Put the fleet in the row below the start line, head to wind for the
+     * countdown, leaving the middle slot for the viewer's own boat.
+     */
     reset(course, windFromDeg) {
-      const [a, b] = course.start;
-      const u = course.up;
+      const mid = (course.slots - 1) / 2;
+      const free = Array.from({ length: course.slots }, (_, k) => k).filter((k) => k !== mid);
       boats.forEach((s, i) => {
-        const f = (i + 0.5) / boats.length;
-        s.w.set(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f).addScaledVector(u, -4 - (i % 2) * 3);
-        s.tack = i % 2 ? 1 : -1;
-        s.heading = (windFromDeg + s.tack * BEAT + 360) % 360;
-        s.speed = 0.06; s.boom = 0; s.fill = 1; s.heel = 0;
+        s.w.copy(course.slot(free[i % free.length]));
+        s.tack = i % 2 ? 1 : -1;          // the tack each one takes at the gun
+        if (course.race.phase === 'countdown') {
+          s.heading = windFromDeg % 360;
+          s.speed = 0; s.boom = 0; s.fill = 0; s.heel = 0;
+        } else {                          // no countdown: already sailing
+          s.heading = (windFromDeg + s.tack * BEAT + 360) % 360;
+          s.speed = 0.06; s.boom = 0; s.fill = 1; s.heel = 0;
+        }
         s.tgt = 0; s.tackTime = 0;
         s.tackAfter = 18 + 22 * Math.random();
         s.perf = 0.86 + 0.14 * Math.random();
@@ -104,7 +111,9 @@ export function createFleet() {
         const brg = Math.atan2(tg.x - s.w.x, -(tg.y - s.w.y)) / D2R;
         const rel = wrap180(brg - windFromDeg);
         let want;
-        if (Math.abs(rel) < NOGO) {
+        if (course.race.phase === 'countdown') {
+          want = windFromDeg;                              // head to wind, waiting for the gun
+        } else if (Math.abs(rel) < NOGO) {
           if (!s.tack) s.tack = rel >= 0 ? 1 : -1;
           s.tackTime += dt;
           // now and then tack up the middle of the beat

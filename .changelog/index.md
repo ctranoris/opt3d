@@ -4,6 +4,17 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-03
 
+- [Start line-up and 10 s countdown](20261103_1845_start-countdown.md) —
+  Re-lay course lines every boat up head to wind below the start line
+  and counts down 10 s, with horn and beeps, and an OCS rule.
+
+- [A better sea](20261103_1815_better-sea.md) —
+  Gerstner waves running downwind, per-pixel ripples, clouds reflected,
+  light through the crests, whitecaps and a sea that builds with the wind.
+
+- [Commit and push: islands and sound](20261103_1750_commit-and-push-islands-sound.md) —
+  committed the islands, sound and recordings to main (39635ba) and pushed.
+
 - [Lower islands](20261103_1745_lower-islands.md) —
   island peaks roughly halved, so they sit low on the horizon.
 

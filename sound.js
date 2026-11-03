@@ -130,6 +130,37 @@ export function createSound() {
     }
   }
 
+  /**
+   * Race signals, synthesised: 'horn' (the 10 s warning), 'beep' (each of
+   * the last seconds) and 'gun' (the long start horn).
+   */
+  function signal(kind) {
+    if (!ctx || !enabled) return;
+    const t0 = ctx.currentTime;
+    const len = kind === 'gun' ? 1.1 : kind === 'horn' ? 0.6 : 0.12;
+    const f = kind === 'beep' ? 880 : 233;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(kind === 'beep' ? 0.18 : 0.28, t0 + 0.02);
+    g.gain.setValueAtTime(kind === 'beep' ? 0.18 : 0.28, t0 + len - 0.08);
+    g.gain.linearRampToValueAtTime(0, t0 + len);
+    // a horn is a buzzy pair of saw waves through a low-pass
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = kind === 'beep' ? 4000 : 1400;
+    g.connect(master);
+    lp.connect(g);
+    const oscs = (kind === 'beep' ? [f] : [f, f * 1.006]).map((fr) => {
+      const o = ctx.createOscillator();
+      o.type = kind === 'beep' ? 'sine' : 'sawtooth';
+      o.frequency.value = fr;
+      o.connect(lp);
+      o.start(t0); o.stop(t0 + len + 0.05);
+      return o;
+    });
+    played.push(kind); if (played.length > 20) played.shift();
+    return oscs.length;
+  }
+
   function setEnabled(on) {
     enabled = on;
     if (!ctx) return;
@@ -138,7 +169,7 @@ export function createSound() {
   }
 
   return {
-    update, setEnabled, start,
+    update, setEnabled, start, signal,
     get ready() { return ready; },
     get enabled() { return enabled; },
     get context() { return ctx; },

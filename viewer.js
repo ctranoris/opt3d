@@ -22,6 +22,7 @@ import { createMountains } from './mountains.js';
 import { createSound } from './sound.js';
 
 const D2R = Math.PI / 180;
+const wrap180 = (d) => ((d % 360) + 540) % 360 - 180;
 const boot = document.getElementById('boot');
 const bootMsg = document.getElementById('bootMsg');
 
@@ -157,18 +158,36 @@ function skyTexture() {
  * water
  * ------------------------------------------------------------------ */
 
+// The wind sea, as Gerstner waves: the crests are sharp and the troughs
+// broad.  They run toward +z, downwind of the default northerly, spread
+// either side of it.  Deep-water dispersion sets each wave's speed from
+// its length (slowed a little, to suit the small scale of the scene).
+// Each entry is the direction of travel (degrees round +Y from +x), the
+// amplitude (metres) and the wavelength (metres).
 const WAVES = [
-  // dirX, dirZ, amplitude, wavelength, speed
-  [1.0, 0.25, 0.035, 3.1, 0.55],
-  [0.35, -1.0, 0.026, 2.2, 0.72],
-  [-0.6, 0.8, 0.016, 1.3, 0.95],
-  [0.85, 0.55, 0.009, 0.62, 1.35],
+  [90, 0.036, 4.6],
+  [62, 0.024, 3.1],
+  [118, 0.018, 2.3],
+  [40, 0.012, 1.6],
+  [140, 0.008, 1.15],
 ];
+// Ripples too short for the grid: per pixel only, in the shading normal.
+// Each entry is a direction and a wavelength; the amplitude is a fixed
+// steepness of the wavelength.
+const RIPPLES = [[80, 0.9], [125, 0.62], [55, 0.45], [100, 0.31], [30, 0.22], [150, 0.15], [70, 0.105]];
+const OMEGA = (l) => Math.sqrt(9.81 * (Math.PI * 2) / l) * 0.75;
+// Horizontal displacement of the crests, as a share of 1/k (Gerstner Q·k·A).
+const CHOP = 0.09;
 
 // How far the boat has sailed, world x/z, metres.  The boat stays in the
 // middle of the compass rose and the sea moves past her instead, so the
 // waves are evaluated at (world point + odometer).
 const odo = new THREE.Vector2();
+
+// Sea state: the wave heights scale with the wind, eased so the sea
+// builds and dies down over a few seconds.
+let seaK = 0.87;
+const seaTarget = () => 0.6 + 0.6 * state.wind;
 
 /** Water surface height at a world point - mirrored in the shader. */
 function waveHeight(x, z, t) {
@@ -178,46 +197,53 @@ function waveHeight(x, z, t) {
   const fade = 1 - 0.65 * u * u * (3 - 2 * u);
   x += odo.x; z += odo.y;
   let h = 0;
-  for (const [dx, dz, a, l, s] of WAVES) {
-    const n = Math.hypot(dx, dz);
+  for (const [deg, a, l] of WAVES) {
     const k = (Math.PI * 2) / l;
-    h += a * Math.sin(k * (x * dx + z * dz) / n + t * s * 2.0);
+    const dx = Math.cos(deg * D2R), dz = Math.sin(deg * D2R);
+    h += a * Math.sin(k * (x * dx + z * dz) - OMEGA(l) * t);
   }
-  return h * fade;
+  return h * seaK * fade;
 }
 
 /** Sea height at a point fixed in the water (water = world + odometer). */
 const seaAt = (wx, wz) => waveHeight(wx - odo.x, wz - odo.y, state.t);
 
+// The big waves, shared by both shaders: height, horizontal gradient,
+// and the Gerstner terms (crest displacement, and the sum that pinches
+// the normal at the crests).  \`p\` is the local grid point, \`q\` the point
+// in the water (plus the odometer).
+const WAVE_GLSL = /* glsl */`
+  uniform float uSea;
+  struct Sea { float h; vec2 grad; vec2 disp; float pinch; };
+  Sea seaWaves(vec2 p, vec2 q, float t) {
+    Sea s = Sea(0.0, vec2(0.0), vec2(0.0), 0.0);
+    // ease the swell out toward the horizon, as waveHeight() does
+    float u = clamp((length(p) - 6.0) / 54.0, 0.0, 1.0);
+    float fade = (1.0 - 0.65 * u * u * (3.0 - 2.0 * u)) * uSea;
+    #define W(d, amp, k, w) { float ph = k * dot(q, d) - w * t; float c = cos(ph), sn = sin(ph); \\
+      s.h += amp * fade * sn; s.grad += amp * fade * k * c * d; \\
+      s.disp += d * (${CHOP} * uSea / k) * c; s.pinch += ${CHOP} * fade * sn; }
+${WAVES.map(([deg, a, l]) => `    W(vec2(${Math.cos(deg * D2R).toFixed(5)}, ${Math.sin(deg * D2R).toFixed(5)}), ${a.toFixed(4)}, ${(Math.PI * 2 / l).toFixed(5)}, ${OMEGA(l).toFixed(5)});`).join('\n')}
+    #undef W
+    return s;
+  }
+`;
+
 const WATER_VS = /* glsl */`
   uniform float uTime;
   uniform vec2 uOffset;
   varying vec3 vWorld;
-  varying vec3 vNrm;
-
-  // one sine wave, accumulating height and horizontal gradient
-  void addWave(vec2 p, vec2 dir, float amp, float len, float speed,
-               inout float h, inout vec2 grad) {
-    vec2 d = normalize(dir);
-    float k = 6.2831853 / len;
-    // ease the steepness out toward the horizon
-    float fade = mix(1.0, 0.35, smoothstep(6.0, 60.0, length(p)));
-    float ph = k * dot(p + uOffset, d) + uTime * speed * 2.0;
-    h += amp * fade * sin(ph);
-    grad += amp * fade * k * d * cos(ph);
-  }
+  varying vec2 vP;
+  ${WAVE_GLSL}
 
   void main() {
     vec2 p = position.xz;
-    float h = 0.0;
-    vec2 grad = vec2(0.0);
-    addWave(p, vec2( 1.00,  0.25), 0.035, 3.10, 0.55, h, grad);
-    addWave(p, vec2( 0.35, -1.00), 0.026, 2.20, 0.72, h, grad);
-    addWave(p, vec2(-0.60,  0.80), 0.016, 1.30, 0.95, h, grad);
-    addWave(p, vec2( 0.85,  0.55), 0.009, 0.62, 1.35, h, grad);
-
-    vNrm = normalize(vec3(-grad.x, 1.0, -grad.y));
-    vWorld = (modelMatrix * vec4(p.x, h, p.y, 1.0)).xyz;
+    Sea s = seaWaves(p, p + uOffset, uTime);
+    vP = p;
+    // crests drawn together: the displacement fades out with the swell
+    float u = clamp((length(p) - 6.0) / 54.0, 0.0, 1.0);
+    vec2 xz = p + s.disp * (1.0 - 0.65 * u * u * (3.0 - 2.0 * u));
+    vWorld = (modelMatrix * vec4(xz.x, s.h, xz.y, 1.0)).xyz;
     gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.0);
   }
 `;
@@ -236,8 +262,18 @@ const WATER_FS = /* glsl */`
   uniform vec2 uOffset;
   uniform float uTime;
   uniform float uWake;
+  uniform float uCaps;
+  uniform sampler2D uSkyTex;
+  uniform vec3 uSSS;
   varying vec3 vWorld;
-  varying vec3 vNrm;
+  varying vec2 vP;
+  ${WAVE_GLSL}
+
+  // The sky texture (with its clouds) in a direction, for reflections.
+  vec3 skyTex(vec3 d) {
+    vec2 uv = vec2(atan(d.z, d.x) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);
+    return texture2D(uSkyTex, uv).rgb;
+  }
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float vnoise(vec2 p) {
@@ -343,35 +379,53 @@ const WATER_FS = /* glsl */`
       wakeSum += wakeShape(bi, uFleetWake[i]);
     }
     vec3 V = normalize(cameraPosition - vWorld);
-    vec3 N = normalize(vNrm);
-    // small-ripple normal detail
-    vec2 wq = vWorld.xz + uOffset;
-    float r = sin(wq.x * 9.0) * sin(wq.y * 11.0) * 0.02
-            + sin(wq.x * 23.0 + 2.0) * sin(wq.y * 19.0) * 0.012;
-    N = normalize(N + vec3(r, 0.0, r * 0.7));
+    float dist = length(cameraPosition - vWorld);
+
+    // Per-pixel normal: the big waves, then ripples too short for the
+    // grid, each fading out before it gets finer than a pixel can show.
+    vec2 q = vP + uOffset;
+    Sea s = seaWaves(vP, q, uTime);
+    vec2 g = s.grad;
+    float rip = (0.55 + 0.45 * uSea);
+    #define R(d, amp, k, w, len) { float ph = k * dot(q, d) - w * uTime; \
+      g += amp * rip * k * cos(ph) * d * smoothstep(len * 55.0, len * 10.0, dist); }
+${RIPPLES.map(([deg, l]) => `    R(vec2(${Math.cos(deg * D2R).toFixed(5)}, ${Math.sin(deg * D2R).toFixed(5)}), ${(l * 0.0095).toFixed(5)}, ${(Math.PI * 2 / l).toFixed(5)}, ${(OMEGA(l) * 1.3).toFixed(5)}, ${l.toFixed(3)});`).join('\n')}
+    #undef R
+    vec3 N = normalize(vec3(-g.x, 1.0 - s.pinch, -g.y));
 
     float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
-    vec3 R = reflect(-V, N);
-    R.y = abs(R.y) * 0.55 + 0.02;
-    vec3 refl = sky(normalize(R));
-    vec3 body = mix(uDeep, uShallow, clamp(N.y * 0.5 + 0.35, 0.0, 1.0));
-    vec3 col = mix(body, refl, clamp(fres * 1.25, 0.0, 1.0));
+    vec3 Rf = reflect(-V, N);
+    Rf.y = max(Rf.y, 0.004);
+    vec3 refl = skyTex(normalize(Rf));
+    // the water's own colour: darker looking straight down into it
+    vec3 body = mix(uShallow, uDeep, clamp(dot(N, V) * 1.2, 0.0, 1.0));
+    // light through the thin tops of the waves, strongest looking toward the sun
+    float crest = clamp(s.h / (0.075 * max(uSea, 0.2)) * 0.5 + 0.5, 0.0, 1.0);
+    vec3 sunH = normalize(vec3(uSun.x, 0.0, uSun.z) + 1e-4);
+    float back = pow(max(dot(-V, sunH), 0.0), 3.0);
+    body += uSSS * crest * crest * (0.35 + 1.4 * back);
+    vec3 col = mix(body, refl, clamp(fres * 1.15, 0.0, 1.0));
 
     // sun glitter
     vec3 Hv = normalize(V + uSun);
     float spec = pow(max(dot(N, Hv), 0.0), 340.0);
-    col += uSunTint * spec * 4.0;
-    float path = pow(max(dot(normalize(vec3(R.x, 0.0, R.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), 0.0), 6.0);
+    col += uSunTint * spec * 3.0;
+    float path = pow(max(dot(normalize(vec3(Rf.x, 0.0, Rf.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), 0.0), 6.0);
     col += uSunTint * path * smoothstep(0.55, 1.0, fres) * 0.10;
 
     // white water, lit by the sun and the sky
+    // whitecaps: breaking crests, once there is wind enough
+    if (uCaps > 0.001) {
+      float n = vnoise(q * 0.9 + vec2(uTime * 0.05, 0.0)) * 0.65 + vnoise(q * 2.3 - uTime * 0.08) * 0.35;
+      wakeSum += smoothstep(0.9, 1.05, crest + 0.7 * (n - 0.5)) * uCaps * 1.1
+               * smoothstep(90.0, 30.0, dist);
+    }
     float foam = foamTexture(wakeSum, vWorld);
     vec3 foamCol = vec3(0.86, 0.90, 0.93) * (0.75 + 0.35 * max(dot(N, uSun), 0.0));
     col = mix(col, foamCol, foam * 0.92);
 
     // atmospheric haze: fade to the sky just above the horizon in the
     // view direction, so the rim of the plane cannot be seen
-    float dist = length(cameraPosition - vWorld);
     float haze = smoothstep(18.0, 120.0, dist);
     col = mix(col, sky(normalize(V + vec3(0.0, 0.03, 0.0))), haze);
 
@@ -534,6 +588,10 @@ function init() {
       uHull: { value: hullTable() },
       uOffset: { value: odo },
       uWake: { value: 0 },
+      uSea: { value: seaK },
+      uCaps: { value: 0 },
+      uSkyTex: { value: skyTex },
+      uSSS: { value: new THREE.Color(0x1d8a7e).multiplyScalar(0.55) },
       uFleetInv: { value: Array.from({ length: FLEET_N }, () => new THREE.Matrix4()) },
       uFleetWake: { value: new Array(FLEET_N).fill(-1) },
     },
@@ -675,6 +733,7 @@ function animate() {
   if (state.course) {
     const me = new THREE.Vector2(MID + odo.x, odo.y);
     raceInfo = course.update(dt, t, seaAt, trueFlow, state.wind, me);
+    raceSignals(raceInfo);
   }
   if (state.fleet) fleet.update(dt, t, course, state.windFrom, state.wind, seaAt);
 
@@ -714,6 +773,9 @@ function animate() {
 
   const U = water.material.uniforms;
   U.uTime.value = t;
+  seaK += (seaTarget() - seaK) * Math.min(1, dt / 4);
+  U.uSea.value = seaK;
+  U.uCaps.value = smoothstep(0.5, 1.0, state.wind) * 0.85;
   U.uWake.value = Math.min(1.2, (state.speed * 18) / 3);
   U.uBoatInv.value.copy(boat.group.matrixWorld).invert();
   seaFrame.updateMatrixWorld(true);
@@ -786,6 +848,13 @@ function updateRaceHud() {
   let html;
   if (r.phase === 'pre') {
     html = `<div class="big">Cross the start line upwind</div>start line ${go}`;
+  } else if (r.phase === 'countdown') {
+    html = `<div class="big count">Start in ${Math.ceil(r.count)}</div>` +
+      (r.ocs ? '<span class="ocs">Over the line early</span> &middot; dip back below it' : 'hold below the start line, head to wind');
+  } else if (r.phase === 'started') {
+    html = r.ocs
+      ? `<div class="big"><span class="ocs">OCS</span> &middot; ${fmtTime(r.time)}</div>go back below the start line, then start`
+      : `<div class="big">Go! &middot; ${fmtTime(r.time)}</div>cross the start line upwind &middot; ${go}`;
   } else if (r.phase === 'racing') {
     html = `<div class="big">${r.label} &middot; ${fmtTime(r.time)}</div>${go}` +
       `<div class="legs">${r.legs.map((n, i) =>
@@ -798,11 +867,40 @@ function updateRaceHud() {
   if (raceHud._html !== html) { raceHud.innerHTML = html; raceHud._html = html; }
 }
 
-/** Lay the course for the present wind, just upwind of the boat; restart. */
-function layCourse() {
-  course.layout(new THREE.Vector2(MID + odo.x, odo.y), state.windFrom);
+/**
+ * Lay the course for the present wind, just upwind of the boat.  With
+ * `countdown` (the Re-lay button), start the 10 s countdown with every
+ * boat, ours in the middle, in a row below the start line, head to wind;
+ * without (the first lay), the race starts whenever she crosses the line.
+ */
+function layCourse(countdown = false) {
+  course.layout(new THREE.Vector2(MID + odo.x, odo.y), state.windFrom, countdown);
   fleet.reset(course, state.windFrom);
   raceInfo = null;
+  lastCount = null;
+  if (!countdown) return;
+  // ours: head to wind and stopped; the camera swings round with her
+  const yaw = -wrap180(state.windFrom - state.heading) * D2R;
+  for (const v of [camera.position, controls.target]) {
+    v.x -= MID;
+    v.applyAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
+    v.x += MID;
+  }
+  setHeading(state.windFrom);
+  state.speed = 0; state.heel = 0; state.fill = 0;
+}
+
+// race signals: a horn at 10 s, a beep each of the last 5, a long horn at the gun
+let lastCount = null;
+function raceSignals(r) {
+  if (!r) return;
+  const c = r.phase === 'countdown' ? Math.ceil(r.count) : r.phase === 'started' && lastCount > 0 ? 0 : null;
+  if (c === lastCount) return;
+  if (lastCount !== null && c !== null) {
+    if (c === 0) sound.signal('gun');
+    else if (c <= 5) sound.signal('beep');
+  } else if (lastCount === null && c === 10) sound.signal('horn');
+  lastCount = c;
 }
 
 function setCourse(on) {
@@ -1205,8 +1303,8 @@ function bindUI() {
   ui.course.addEventListener('change', () => setCourse(ui.course.checked));
   ui.fleet.addEventListener('change', () => setFleet(ui.fleet.checked));
   $('relay').addEventListener('click', () => {
-    layCourse();
     if (!state.course) setCourse(true);
+    layCourse(true);
   });
 
   document.getElementById('cams').addEventListener('click', (e) => {

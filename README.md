@@ -222,8 +222,12 @@ through a Blender round trip.
 
 `index.html` + `viewer.js`, with `race-course.js` and `fleet.js` for the
 racing and `sailor.js` for the crew. Beyond the boat: a procedural sky with fair-weather cumulus feeding
-image-based lighting, a custom shader sea (four summed sine waves with
-analytic normals, fresnel, sun glitter, distance haze), soft shadows, and
+image-based lighting, a custom shader sea (five Gerstner waves running
+downwind of the default northerly, with deep-water speeds and sharpened
+crests; per-pixel normals with fine ripples that fade out with distance;
+the clouded sky reflected with fresnel; light through the wave crests;
+sun glitter; whitecaps from about 10 kn; a sea that builds with the
+wind; distance haze), soft shadows, and
 seven camera presets.
 
 **Controls**
@@ -245,14 +249,17 @@ seven camera presets.
 | **Sound** | recordings from `sounds/` (`sound.js`): water that rises with boat speed, the sail flapping when it luffs, wind in the rig, the mainsheet running when the boom moves, and the sail filling after a tack or gybe; starts on the first click or key press, fades as the camera pulls back |
 | **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys |
 | **Fleet** | four more Optimists (GRE 2471, 3305, 1888, 5120) racing round the marks; turns the course on |
-| **Re-lay course** | lays the course again for the wind and position you have now, and restarts the race |
+| **Re-lay course** | lays the course again for the wind and position you have now and starts a 10 s countdown: every boat, yours in the middle, is lined up 6 m below the start line, head to wind. A horn sounds at 10 s, a beep each of the last 5 seconds, and a long horn at the gun |
 | **← / → or A / D** | steer: turns the bow at 40°/s, and the camera swings round with her |
 
 **Drag the sail** in the viewport to swing the boom to any angle on either
 side. Orbit with the left button, zoom with the wheel.
 
 **Racing.** With the course laid, steer with the arrow keys (Auto sail
-trims for you). Cross the start line going upwind to start the clock, then
+trims for you). After **Re-lay course**, the clock starts at the gun; cross
+the start line going upwind after it. Over the line before the gun (OCS), you
+have to dip back below it before you can start. When the course is first
+switched on there is no countdown: crossing the line starts the clock. Then
 sail Start – 1 – 2 – 3S/3P – Finish, the rounding order of the Optimist
 Worlds course (`init_assets/example_course.png`):
 
