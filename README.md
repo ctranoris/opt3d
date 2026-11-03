@@ -263,8 +263,8 @@ Elsewhere:
 
 - `tools/` — the plan images with measurement grids overlaid, and the small
   scripts used to read offsets off the plan and the STL
-- `build/` — rendered screenshots from the verification runs, and
-  `optimist.glb`
+- `build/` — local output of the verification scripts (screenshots,
+  `optimist.glb`); git-ignored, regenerate it with `.tools/`
 
 ---
 

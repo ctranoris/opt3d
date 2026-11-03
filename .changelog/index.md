@@ -4,6 +4,8 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-03
 
+- [Untrack build/ and merge to main](20261103_1203_untrack-build-merge-main.md) —
+  build output removed from git and ignored; rebuild branch merged into main.
 - [Commit and push](20261103_1158_commit-and-push.md) — added .gitignore,
   committed the rebuild on branch `accurate-model-rebuild` and pushed it.
 - [Accurate model rebuild](20261103_1151_accurate-model-rebuild.md) — clean-slate
