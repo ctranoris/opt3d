@@ -2,7 +2,19 @@
 
 Log of completed actions on the Optimist 3D viewer. Newest first.
 
+## 2026-11-06
+
+- [Laser sail window a quarter as tall](20261106_2054_laser-sail-window.md) —
+  the ILCA sail window cut to 0.155 m high (was 0.62 m).
+
+- [ILCA 4 / Laser 4.7 model](20261106_2042_laser-model.md) —
+  second boat from init_assets/laser4.7 (bent-mast una rig, traveller,
+  cockpit); Boat selector with cookie, fleet and course scale with it.
+
 ## 2026-11-03
+
+- [Commit and push: sailors, cookie, finish ranking](20261103_2040_commit-and-push-ranking.md) —
+  pushed dcafa60 to origin/main.
 
 - [Finish ranking](20261103_2036_finish-ranking.md) —
   race clock from the gun; fleet boats timed across the finish line; a

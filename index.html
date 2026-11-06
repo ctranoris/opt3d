@@ -72,13 +72,14 @@
     width: 13px; height: 13px; border-radius: 50%; border: 2px solid #0b1016;
     background: var(--accent);
   }
-  input[type=text].txt {
+  input[type=text].txt, select.txt {
     flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px;
     color: var(--text); background: rgba(255, 255, 255, 0.07);
     border: 1px solid var(--panel-line); border-radius: 7px;
     padding: 4px 8px; letter-spacing: 0.06em;
   }
-  input[type=text].txt:focus {
+  select.txt option { background: #1a2430; color: #e8eef4; }
+  input[type=text].txt:focus, select.txt:focus {
     outline: none; border-color: var(--accent); background: rgba(255, 255, 255, 0.12);
   }
   .btns { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -229,6 +230,13 @@
         <div class="checks">
           <label class="chk"><input id="autoSail" type="checkbox" checked>Auto sail</label>
           <label class="chk"><input id="seaMotion" type="checkbox" checked>Sea motion</label>
+        </div>
+        <div class="row">
+          <label for="boatType">Boat</label>
+          <select id="boatType" class="txt" title="Boat type (remembered in a cookie; reloads the page)">
+            <option value="optimist">Optimist</option>
+            <option value="laser">ILCA 4 / Laser 4.7</option>
+          </select>
         </div>
         <div class="row">
           <label for="sailCountry">Country</label>

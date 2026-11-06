@@ -22,13 +22,20 @@
 import * as THREE from 'three';
 import { EXTENSION } from './model/opti-boat.js';
 
+// Where an Optimist sailor sits and puts their feet, boat frame; another
+// boat passes its own as boat.pose (same layout, see update()).
+const OPTI_POSE = {
+  seatX: [1.64, 1.55], seatY: [0.47, 0.44, 0.23], seatZ: [0.47, 0.15],
+  footX: [1.42, 0.05, 1.40], footY: [0.085, 0.06], footZ: [0.155, 0.17],
+};
+
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smoothstep = (e0, e1, x) => { const u = clamp((x - e0) / (e1 - e0), 0, 1); return u * u * (3 - 2 * u); };
 const mix = (a, b, u) => a + (b - a) * u;
 const D2R = Math.PI / 180;
 
 // limb lengths for a 1.45 m, 11-12 year old
-const L = { spine: 0.46, thigh: 0.40, shin: 0.39, upper: 0.27, fore: 0.25, neck: 0.07 };
+const L0 = { spine: 0.46, thigh: 0.40, shin: 0.39, upper: 0.27, fore: 0.25, neck: 0.07 };
 const SWITCH = 4;      // deg of boom off the centreline before the sailor changes sides
 const CROSS = 1.5;     // side units per second: about 1.3 s across the boat
 
@@ -74,7 +81,9 @@ const TAIL = [[0, 0], [0.018, 0], [0.026, 0.03], [0.03, 0.07], [0.026, 0.13], [0
  * Returns { group, update(opts) }.
  */
 export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1b2333,
-  ponytail = false, hair = HAIR[0] } = {}) {
+  ponytail = false, hair = HAIR[0], size = 1 } = {}) {
+  // limb lengths, scaled for an older sailor in a bigger boat
+  const L = Object.fromEntries(Object.entries(L0).map(([k, v]) => [k, v * size]));
   const group = new THREE.Group();
   group.name = 'Sailor';
 
@@ -194,8 +203,11 @@ export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1
     f.set(-mix(0.57, 1, c), 0, -s * 0.82).normalize();
 
     // pelvis on the side deck; out over the edge when hiking
-    P.set(mix(1.64, 1.55, c), mix(mix(0.47, 0.44, hike), 0.23, c) + bob * (1 - hike),
-      s * (0.47 + 0.15 * hike));
+    // (seatX: [on a side, ducking]; seatY: [sitting, hiking, ducking];
+    // seatZ: [sitting, extra out when hiking])
+    const Q = (boat && boat.pose) || OPTI_POSE;
+    P.set(mix(Q.seatX[0], Q.seatX[1], c), mix(mix(Q.seatY[0], Q.seatY[1], hike), Q.seatY[2], c) + bob * (1 - hike),
+      s * (Q.seatZ[0] + Q.seatZ[1] * hike));
 
     // spine: lean back (outboard) to hike, forward to duck
     const lean = mix(mix(-6, 55, hike), -38, c) * D2R;
@@ -230,7 +242,8 @@ export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1
     for (const leg of legs) {
       const k = leg.i ? 1 : -1;
       leg.hip.copy(P).addScaledVector(right, 0.085 * k).addScaledVector(spine, -0.02);
-      tmp.set(mix(1.42 + 0.05 * hike, 1.40, c), mix(0.085, 0.06, c), mix(s * mix(0.155, 0.17, hike), 0, c))
+      tmp.set(mix(Q.footX[0] + Q.footX[1] * hike, Q.footX[2], c), mix(Q.footY[0], Q.footY[1], c),
+        mix(s * mix(Q.footZ[0], Q.footZ[1], hike), 0, c))
         .addScaledVector(rightH, 0.075 * k);
       pole.copy(UP).addScaledVector(f, 0.6).addScaledVector(rightH, 0.15 * k);
       ik(leg.hip, tmp, L.thigh, L.shin, pole, leg.knee, leg.ankle);
@@ -273,7 +286,7 @@ export function createSailor({ jacket = JACKETS[0], cap = 0xffffff, shorts = 0x1
       tmp.copy(tillerTarget).sub(joint);
       if (tmp.lengthSq() < 1e-6) tmp.set(-1, 0, 0);
       tmp.normalize();
-      grip.copy(joint).addScaledVector(tmp, EXTENSION);
+      grip.copy(joint).addScaledVector(tmp, (boat && boat.extensionLen) || EXTENSION);
       // direction into the tiller's own frame (rotation only)
       q.setFromRotationMatrix(invExt).invert();
       ext.quaternion.setFromUnitVectors(tmp2.set(-1, 0, 0), tmp.applyQuaternion(q));

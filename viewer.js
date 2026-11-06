@@ -6,7 +6,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { SPEC } from './model/opti-core.js';
-import { createBoat, makeMaterials } from './model/opti-boat.js';
+import { makeMaterials } from './model/opti-boat.js';
+import { BOAT_TYPE, BS, hullStation, createAnyBoat, rememberBoatType } from './model/boats.js';
 import {
   updateRig, updateMainsheet, setSailMarks, setWindVane,
   BATTENS, TELLTALES, WINDOW, INSIGNIA,
@@ -293,7 +294,7 @@ const WATER_FS = /* glsl */`
   // True where this point of the sea (in a boat's frame) lies inside the
   // hull: the water there is the boat's interior, so it must not be drawn.
   bool insideHull(vec3 b) {
-    if (b.x <= 0.0 || b.x >= ${SPEC.loa.toFixed(3)}) return false;
+    if (b.x <= 0.0 || b.x >= ${BS.loa.toFixed(3)}) return false;
     vec4 h = hullAt(b.x);
     if (b.y <= h.z || b.y >= h.x + 0.15) return false;
     float k = clamp((b.y - h.z) / max(h.x - h.z, 1e-3), 0.0, 1.0);
@@ -308,7 +309,7 @@ const WATER_FS = /* glsl */`
   // \`b\` is the point in the boat's frame, \`wake\` her speed factor.
   float wakeShape(vec3 b, float wake) {
     if (wake <= 0.001) return 0.0;
-    float L = ${SPEC.loa.toFixed(3)};
+    float L = ${BS.loa.toFixed(3)};
     if (b.x < -0.6 || b.x > 16.0 || abs(b.z) > 7.0) return 0.0;
     float foam = 0.0;
 
@@ -507,7 +508,9 @@ function camFor(name) {
   const p = new THREE.Vector3(...c.pos), q = new THREE.Vector3(...c.tgt);
   if (SIDED.has(name) && windFromPort()) { p.z = -p.z; q.z = -q.z; }
   const yaw = -(state.heading + 90) * D2R;
+  const k = BS.camScale;          // a bigger boat: stand further off
   for (const v of [p, q]) {
+    v.x = MID + (v.x - MID) * k; v.y *= k; v.z *= k;
     v.x -= MID;
     v.applyAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
     v.x += MID;
@@ -516,6 +519,14 @@ function camFor(name) {
 }
 
 function init() {
+  // name the page after the boat
+  if (BS.key !== 'optimist') {
+    document.title = `${BS.name} - 3D viewer`;
+    const h1 = document.querySelector('h1');
+    if (h1) h1.textContent = BS.name;
+    const sub = document.querySelector('p.sub');
+    if (sub) sub.innerHTML = `${BS.sub} &middot; ${BS.loa.toFixed(2)} m &times; ${BS.beam.toFixed(2)} m`;
+  }
   const app = document.getElementById('app');
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -585,7 +596,7 @@ function init() {
       uSeaTint: { value: SEA_TINT.clone() },
       uOpacity: { value: 1 },
       uBoatInv: { value: new THREE.Matrix4() },
-      uHull: { value: hullTable() },
+      uHull: { value: hullTable(hullStation, BS.loa) },
       uOffset: { value: odo },
       uWake: { value: 0 },
       uSea: { value: seaK },
@@ -603,16 +614,16 @@ function init() {
   scene.add(water);
 
   // ---- the boat --------------------------------------------------
-  boat = createBoat(makeMaterials());
+  boat = createAnyBoat(makeMaterials());
   // The heading turns the boat about her midship, so she stays in the
   // middle of the compass rose.  Heel and pitch stay on boat.group.
   helm = new THREE.Group();
   helm.name = 'Heading';
   helm.position.set(MID, 0, 0);
   helm.add(boat.group);
-  sailor = createSailor();
+  sailor = createSailor({ size: BS.sailorSize });
   boat.group.add(sailor.group);
-  boat.group.position.x = -MID;
+  boat.group.position.x = -BS.mid;
   scene.add(helm);
 
   // ---- compass rose on the water, and the wind arrow ---------------
@@ -740,18 +751,18 @@ function animate() {
   // Float on the water.  The boat frame is +X aft, +Y up, +Z to port, so
   // heel is a rotation about X (+ heels to port) and pitch one about Z.
   helm.rotation.y = -(state.heading + 90) * D2R;
-  const y0 = -SPEC.waterline;
+  const y0 = -BS.waterline;
   const heel = state.heel * D2R;
   if (state.seaMotion) {
     // sample the sea under the midship, the bow and the stern, wherever
     // she happens to point
     const bx = Math.sin(state.heading * D2R), bz = -Math.cos(state.heading * D2R);
-    const aft = SPEC.loa - MID;
+    const aft = BS.loa - BS.mid;
     const h = waveHeight(MID, 0, t);
     const hS = waveHeight(MID - bx * aft, -bz * aft, t);   // under the stern
-    const hB = waveHeight(MID + bx * MID, bz * MID, t);    // under the bow
+    const hB = waveHeight(MID + bx * BS.mid, bz * BS.mid, t);    // under the bow
     boat.group.position.y = y0 + h;
-    boat.group.rotation.z = Math.atan2(hS - hB, SPEC.loa) * 0.85;   // +z lifts the stern
+    boat.group.rotation.z = Math.atan2(hS - hB, BS.loa) * 0.85;   // +z lifts the stern
     boat.group.rotation.x = heel * (0.82 + 0.18 * Math.sin(t * 0.9));
     boat.group.rotation.y = 0.03 * Math.sin(t * 0.4) - heel * 0.25;
   } else {
@@ -1047,7 +1058,7 @@ function sailTrim(dt, t) {
   const polar = smoothstep(32, 75, state.twa) * (1 - 0.12 * smoothstep(110, 180, state.twa));
   const trim = Math.max(0, 1 - Math.abs(Math.abs(state.boom) - optimalBoom(state.awa)) / 50);
   const e = drive > 0 ? trim * Math.min(1, Math.abs(state.fill)) : 0;
-  const target = 0.42 * state.wind * polar * e;
+  const target = 0.42 * BS.speedK * state.wind * polar * e;
   state.speed += (target - state.speed) * Math.min(1, dt / 2.5);
 }
 
@@ -1111,13 +1122,16 @@ function rigPoint(which, dx, dy) {
   return tmpV.clone();
 }
 
+/** The labels for this boat: its own list if it has one. */
+function partsList() { return boat.parts || PARTS; }
+
 let labelEls = null, leaderEls = null;
 function ensureLabels() {
   if (labelEls) return;
   const host = document.getElementById('labels');
   const svg = document.getElementById('leaders');
   labelEls = []; leaderEls = [];
-  PARTS.forEach(([text]) => {
+  partsList().forEach(([text]) => {
     const div = document.createElement('div');
     div.className = 'lbl';
     div.textContent = text;
@@ -1175,8 +1189,9 @@ function drawLabels() {
   const panel = { x0: p.left - 6, x1: p.right + 6, y0: p.top - 6, y1: p.bottom + 6 };
 
   const placed = [];
-  for (let i = 0; i < PARTS.length; i++) {
-    const wp = PARTS[i][1]();
+  const parts = partsList();
+  for (let i = 0; i < parts.length; i++) {
+    const wp = parts[i][1]();
     _proj.copy(wp).project(camera);
     const div = labelEls[i], line = leaderEls[i];
     if (_proj.z > 1 || _proj.z < -1) {
@@ -1235,7 +1250,7 @@ function updateReadout() {
     `<b>${kn} kn</b> wind from <b>${pad3(state.windFrom)}&deg; ${cardinal(state.windFrom)}</b><br>` +
     `heading <b>${pad3(state.heading)}&deg; ${cardinal(state.heading)}</b> &nbsp; TWA <b>${state.twa.toFixed(0)}&deg;</b> ${side}<br>` +
     `boom <b>${fmtBoom(state.boom)}</b> &nbsp; heel <b>${Math.abs(heel).toFixed(1)}&deg;</b> &nbsp; speed <b>${(state.speed * 18).toFixed(1)} kn</b><br>` +
-    `LOA 2.30 m &middot; beam 1.13 m &middot; sail <b>${sailArea.toFixed(1)} m&sup2;</b>`;
+    `LOA ${BS.loa.toFixed(2)} m &middot; beam ${BS.beam.toFixed(2)} m &middot; sail <b>${sailArea.toFixed(1)} m&sup2;</b>`;
 }
 
 /**
@@ -1244,6 +1259,7 @@ function updateReadout() {
  */
 let sailArea = 0;
 function measureSail() {
+  if (boat.sailArea) { sailArea = boat.sailArea; return; }
   const c = boat.corners;
   const tri = (p, q, r) => {
     const ux = q.x - p.x, uy = q.y - p.y;
@@ -1288,6 +1304,18 @@ function bindUI() {
   ui.water = $('waterChk'); ui.spin = $('spinChk');
   ui.windDir = $('windDir'); ui.heading = $('heading');
   ui.sailCountry = $('sailCountry'); ui.sailNumber = $('sailNumber');
+
+  // Boat type: remembered in a cookie; the scene is rebuilt by a reload.
+  ui.boatType = $('boatType');
+  if (ui.boatType) {
+    ui.boatType.value = BOAT_TYPE;
+    ui.boatType.addEventListener('change', () => {
+      rememberBoatType(ui.boatType.value);
+      const u = new URL(location.href);
+      u.searchParams.delete('boat');
+      location.href = u.toString();
+    });
+  }
 
   // The two lines on the cloth: national letters over the sail number.
   // Repaint on each keystroke so the sail keeps up with the typing.
@@ -1422,7 +1450,7 @@ function bindUI() {
         restore();
         const blob = new Blob([buf], { type: 'model/gltf-binary' });
         const a = document.createElement('a');
-        a.download = 'optimist-dinghy.glb';
+        a.download = BS.glb;
         a.href = URL.createObjectURL(blob);
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 4000);
@@ -1490,7 +1518,7 @@ function pointerToSheet(ev) {
   const hit = new THREE.Vector3();
   if (!ray.ray.intersectPlane(plane, hit)) return;
   boat.group.worldToLocal(hit);
-  const dx = hit.x - SPEC.mastFromBow;
+  const dx = hit.x - BS.mastFromBow;
   const dz = hit.z;
   if (Math.hypot(dx, dz) < 0.1) return;
   // + to starboard, which is the boat's -z

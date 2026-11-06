@@ -30,7 +30,8 @@ export function bearingOf(dir) {
  * ------------------------------------------------------------------ */
 
 export const HULL_STEP = 0.05;
-export const HULL_N = Math.round(SPEC.loa / HULL_STEP) + 1;   // 47
+// enough stations for the longest hull (the 4.23 m ILCA); shorter ones pad
+export const HULL_N = Math.round(4.30 / HULL_STEP) + 1;   // 47
 
 /**
  * One vec4 per station, every HULL_STEP from the bow:
@@ -38,11 +39,11 @@ export const HULL_N = Math.round(SPEC.loa / HULL_STEP) + 1;   // 47
  * Between bottom and sheer the side is a straight line, which is the
  * outside of the hull everywhere above the bilge.
  */
-export function hullTable() {
+export function hullTable(station = (x) => [sheerY(x), sheerHalf(x), bottomY(x), bottomHalf(x)], loa = SPEC.loa) {
   const out = [];
   for (let i = 0; i < HULL_N; i++) {
-    const x = Math.min(SPEC.loa, i * HULL_STEP);
-    out.push(new THREE.Vector4(sheerY(x), sheerHalf(x), bottomY(x), bottomHalf(x)));
+    const x = Math.min(loa, i * HULL_STEP);
+    out.push(new THREE.Vector4(...station(x)));
   }
   return out;
 }

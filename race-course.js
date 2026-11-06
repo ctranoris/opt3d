@@ -21,6 +21,7 @@
  */
 
 import * as THREE from 'three';
+import { BS } from './model/boats.js';
 
 const D2R = Math.PI / 180;
 
@@ -44,7 +45,13 @@ const PLAN = {
   finish: [42, -50],           // middle of the finish line, square to the wind
   finishHalf: 7,
 };
-export const ROUND_RADIUS = 7;   // pass this close to a mark to round it
+// A bigger, faster boat gets a bigger course (start slots, legs and all).
+const K = BS.courseScale || 1;
+PLAN.startHalf *= K; PLAN.startAhead *= K; PLAN.finishHalf *= K;
+PLAN.finish = PLAN.finish.map((v) => v * K);
+for (const m of PLAN.marks) m.at = m.at.map((v) => v * K);
+
+export const ROUND_RADIUS = 7 * K;   // pass this close to a mark to round it
 export const COUNTDOWN = 10;     // seconds from laying the course to the gun
 
 const MARK_COL = 0xd8231b;

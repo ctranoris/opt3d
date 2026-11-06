@@ -572,6 +572,7 @@ export function sailTexture(marks = SAIL_MARKS, corners = rigCorners()) {
  */
 export function setSailMarks(rig, marks = {}) {
   Object.assign(SAIL_MARKS, marks);
+  if (rig.paint) { rig.paint(SAIL_MARKS); return; }
   const old = rig.materials.sailMat.map;
   rig.materials.sailMat.map = sailTexture(SAIL_MARKS, rig.corners);
   rig.materials.sailMat.needsUpdate = true;
@@ -825,6 +826,7 @@ export function createRig(corners = rigCorners(), frame = mastFrame(0.08)) {
  *   t        time, for the luffing ripple.
  */
 export function updateRig(rig, p = {}) {
+  if (rig.update) { rig.update(p); return; }   // a rig that trims itself (the ILCA)
   const { camber = 1, twist = 1, wind = 0.5, fill = 1, t = 0 } = p;
   const boomDeg = p.boomDeg ?? -(p.boomOut ?? 0.35) * 74;
 
@@ -861,6 +863,7 @@ export function updateRig(rig, p = {}) {
  * is a child of the boat group; `cleatBoat` is in boat coordinates.
  */
 export function updateMainsheet(rig, cleatBoat) {
+  if (rig.updateSheet) { rig.updateSheet(cleatBoat); return; }
   const attr = rig.sheet.geometry.attributes.position;
   const arr = attr.array;
   const n = attr.count;

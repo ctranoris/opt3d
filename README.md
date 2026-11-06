@@ -19,6 +19,10 @@ hiking straps, a daggerboard case, aluminium spars, a snotter-tensioned
 sprit, and a mainsheet run from a boom block through a bridle to a ratchet
 block on the centre thwart.
 
+A second boat, the **ILCA 4 / Laser 4.7**, is in `model/laser-boat.js`
+(see [The ILCA 4 / Laser 4.7](#the-ilca-4--laser-47) below). Pick it with
+the **Boat** selector in the panel or with `?boat=laser` in the address.
+
 ---
 
 ## Quick start
@@ -49,6 +53,8 @@ runs offline with nothing fetched from a CDN.
 | `model/opti-hull.js` | the hull shell (outer and inner skins), gunwale, thwarts, daggerboard case, buoyancy bags, floor pads, and the spar/plate/tube/webbing primitives |
 | `model/opti-rig.js` | mast, boom, sprit, snotter, the sail surface, the sail texture, the corner solve, and the mainsheet with bridle and blocks |
 | `model/opti-boat.js` | assembles everything into one `THREE.Group`, plus materials, daggerboard, rudder and tiller, hiking straps and the ratchet block |
+| `model/laser-boat.js` | the ILCA 4 / Laser 4.7: `LASER_SPEC`, hull and deck lines, cockpit, foils, the bent-mast una rig, sail, mainsheet and traveller; `createLaser()` |
+| `model/boats.js` | the boat-type registry, and which type this page load shows (`BOAT_TYPE`, `BS`, `createAnyBoat()`) |
 
 The entry point is **`createBoat()`** in `model/opti-boat.js`, which returns
 the boat as a `THREE.Group` ready to add to a scene:
@@ -241,6 +247,7 @@ seven camera presets.
 | **Draft** | how deep the sail is foiled |
 | **Auto sail** | puts the boom out to leeward at the right angle for the wind, gybing across when the wind changes side |
 | **Sea motion** | float her on the waves |
+| **Boat** | Optimist or ILCA 4 / Laser 4.7; remembered in a cookie (`opt3d_boat`, one year) and the page reloads to build the new boat. `?boat=optimist` or `?boat=laser` in the address overrides the cookie |
 | **Country / Sail no.** | the national letters and sail number on your sail (default GRE 1060); remembered in a cookie (`opt3d_sail`, one year) |
 | **Part labels** | name 25 parts with leader lines |
 | **Turntable** | slowly turns the boat's heading (15°/s); the sail trims itself if Auto sail is on |
@@ -249,7 +256,7 @@ seven camera presets.
 | **Islands** | four low, hazy islands far off on the horizon (640–820 m away, rising about 1° above it), with open sea between them (`mountains.js`) |
 | **Sound** | recordings from `sounds/` (`sound.js`): water that rises with boat speed, the sail flapping when it luffs, wind in the rig, the mainsheet running when the boom moves, and the sail filling after a tack or gybe; starts on the first click or key press, fades as the camera pulls back |
 | **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys |
-| **Fleet** | twelve more Optimists racing round the marks: GRE 1062, 105, 1054 and 1055 (girls), and 1057, 1058, 128, 3153, 1052, 2737, 2828 and 2628 (boys); turns the course on |
+| **Fleet** | twelve more boats of the same type racing round the marks: GRE 1062, 105, 1054 and 1055 (girls), and 1057, 1058, 128, 3153, 1052, 2737, 2828 and 2628 (boys); turns the course on |
 | **Re-lay course** | lays the course again for the wind and position you have now and starts a 10 s countdown: all 13 boats, yours in the middle, are lined up about 3 m apart, 6 m below the 40 m start line, head to wind. A horn sounds at 10 s, a beep each of the last 5 seconds, and a long horn at the gun |
 | **← / → or A / D** | steer: turns the bow at 40°/s, and the camera swings round with her |
 
@@ -333,6 +340,63 @@ on the back face of a `.glb` (see [What does not
 survive](#what-does-not-survive)), so check the sail from both sides after
 import. **Plan** is the preset for judging set-up — foot fore-and-aft, sprit
 angle, how far the boom is eased.
+
+---
+
+## The ILCA 4 / Laser 4.7
+
+The second boat, built from `init_assets/laser4.7/`, which holds:
+
+- the side view (proportions, mast and foil positions, the pre-bent lower mast);
+- the parts diagram;
+- the exploded diagrams PDF (two-piece mast, gooseneck, vang, outhaul, mid-boom and boom-end blocks, traveller, ratchet block on a spring, hiking strap, tiller and extension, bailer);
+- the sail and mast photographs.
+
+It is in the same boat frame as the Optimist (+X aft from the stem head, +Y
+up, +Z to port). `createLaser()` returns the same shape of object as
+`createBoat()`, so the viewer, fleet and sailor drive either boat. The boat
+also carries:
+
+- `spec`;
+- `pose`: where the sailor sits and braces their feet;
+- `extensionLen`;
+- `sailArea`;
+- `parts`: its own label list.
+
+Its rig repaints and re-trims itself through `rig.update`, `rig.updateSheet`
+and `rig.paint`, which `updateRig`, `updateMainsheet` and `setSailMarks` in
+`opti-rig.js` hand on to.
+
+LOA 4.23 m · beam 1.37 m · one sail with three battens and a window.
+
+- **Hull and deck:**
+  - a smooth GRP hull with a hull-to-deck flange;
+  - a non-slip deck;
+  - a self-draining cockpit with a bailer;
+  - the hiking strap;
+  - the daggerboard;
+  - a kick-up rudder with an aluminium head, tiller and extension.
+- **Rig:**
+  - two-piece mast, with the 4.7's pre-bent lower section;
+  - gooseneck, vang, outhaul and boom;
+  - mainsheet from the ratchet block, through the mid-boom and boom-end blocks, to a block on the traveller line between the transom fairleads;
+  - wind vane on the masthead.
+- **Sail:**
+  - national letters and sail number, with port and starboard set at different heights as on the real sail;
+  - grey "4.7" class numerals.
+
+  The class logo and wordmark are left off on purpose.
+- **In the scene:**
+  - the sailor is a little taller;
+  - the boat is about 25% quicker;
+  - the camera presets stand further off;
+  - the race course, start slots and mark radius are scaled ×1.6.
+- **Exported as** `ilca4-laser47.glb`.
+
+**Limitations:**
+
+- Dimensions are read off the drawings and photographs, not taken from the class measurement rules.
+- The sail drawn here, roach included, measures about 5.2 m²; the class quotes 4.7 m² nominal.
 
 ---
 

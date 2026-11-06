@@ -13,7 +13,8 @@
 
 import * as THREE from 'three';
 import { SPEC } from './model/opti-core.js';
-import { createBoat, makeMaterials } from './model/opti-boat.js';
+import { makeMaterials } from './model/opti-boat.js';
+import { createAnyBoat, BS } from './model/boats.js';
 import { updateRig, updateMainsheet, sailTexture } from './model/opti-rig.js';
 import { createSailor, JACKETS, HAIR } from './sailor.js';
 
@@ -54,23 +55,26 @@ export function createFleet() {
   const group = new THREE.Group();
   group.name = 'Fleet';
   const boats = ENTRIES.map((marks, i) => {
-    const b = createBoat(makeMaterials());
-    const old = b.rig.materials.sailMat.map;
-    b.rig.materials.sailMat.map = sailTexture({ country: marks.country, number: marks.number }, b.rig.corners);
-    b.rig.materials.sailMat.needsUpdate = true;
-    if (old) old.dispose();
+    const b = createAnyBoat(makeMaterials());
+    if (b.rig.paint) b.rig.paint({ country: marks.country, number: marks.number });
+    else {
+      const old = b.rig.materials.sailMat.map;
+      b.rig.materials.sailMat.map = sailTexture({ country: marks.country, number: marks.number }, b.rig.corners);
+      b.rig.materials.sailMat.needsUpdate = true;
+      if (old) old.dispose();
+    }
 
     const holder = new THREE.Group();
     holder.name = `Fleet ${marks.country} ${marks.number}`;
     holder.add(b.group);
-    b.group.position.x = -MID;
+    b.group.position.x = -BS.mid;
     group.add(holder);
     holder.updateMatrixWorld(true);
     const toRig = new THREE.Matrix4().copy(b.rig.group.matrix).invert();
     b.cleatRig = b.cleatLocal.clone().applyMatrix4(toRig);
     const sailor = createSailor({
       jacket: JACKETS[(i + 1) % JACKETS.length], cap: i % 2 ? 0x1b2333 : 0xffffff,
-      ponytail: !!marks.girl, hair: HAIR[i % HAIR.length],
+      ponytail: !!marks.girl, hair: HAIR[i % HAIR.length], size: BS.sailorSize,
     });
     b.group.add(sailor.group);
     return {
@@ -105,7 +109,7 @@ export function createFleet() {
         }
         s.tgt = 0; s.tackTime = 0; s.done = false; s.finish = null;
         s.gate = i % 2 ? 'S' : 'P';      // which gate mark to round
-        s.lane = ((i % 7) - 3) * 1.2;     // where along the finish line it crosses, metres
+        s.lane = ((i % 7) - 3) * 1.2 * (BS.courseScale || 1);     // where along the finish line it crosses, metres
         s.tackAfter = 18 + 22 * Math.random();
         s.perf = 0.86 + 0.14 * Math.random();
       });
@@ -175,7 +179,7 @@ export function createFleet() {
         const cn = clamp(4 * across, -1.2, 1.2);
         s.heel += (14 * app * cn * Math.cos(a) - s.heel) * Math.min(1, dt / 0.9);
         const drive = -cn * Math.sin(a);
-        const target = drive > 0 ? 0.42 * wind * polar(twa) * s.perf * Math.min(1, Math.abs(s.fill)) : 0;
+        const target = drive > 0 ? 0.42 * BS.speedK * wind * polar(twa) * s.perf * Math.min(1, Math.abs(s.fill)) : 0;
         s.speed += (target - s.speed) * Math.min(1, dt / 2.5);
 
         // ---- make way ----
@@ -191,16 +195,16 @@ export function createFleet() {
         }
 
         // ---- float ----
-        const aft = SPEC.loa - MID;
+        const aft = BS.loa - BS.mid;
         const hm = seaH(s.w.x, s.w.y);
-        const hF = seaH(s.w.x + bx * MID, s.w.y + bz * MID);
+        const hF = seaH(s.w.x + bx * BS.mid, s.w.y + bz * BS.mid);
         const hA = seaH(s.w.x - bx * aft, s.w.y - bz * aft);
         s.holder.position.set(s.w.x, 0, s.w.y);
         s.holder.rotation.y = -(s.heading + 90) * D2R;
         const g = s.b.group;
-        g.position.y = -SPEC.waterline + hm;
+        g.position.y = -BS.waterline + hm;
         g.rotation.set(s.heel * D2R * (0.82 + 0.18 * Math.sin(t * 0.9 + s.phase)),
-          0.03 * Math.sin(t * 0.4 + s.phase), Math.atan2(hA - hF, SPEC.loa) * 0.85);   // +z lifts the stern (+x)
+          0.03 * Math.sin(t * 0.4 + s.phase), Math.atan2(hA - hF, BS.loa) * 0.85);   // +z lifts the stern (+x)
       }
     },
 
