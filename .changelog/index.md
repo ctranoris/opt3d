@@ -4,6 +4,34 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-10
 
+- [Start between the flags or a 360; course 25% longer](20261110_2149_start-flags-360-longer-course.md) —
+  starting outside the two start flags costs a full turn, for us and the
+  fleet; start line carried on to the left; all legs a quarter longer.
+
+- [Contact between boats, VMG to the next mark, jury boats](20261110_2140_collisions-vmg-jury.md) —
+  hulls are solid and the fleet keeps clear by port/starboard and
+  windward/leeward; VMG reads toward the next mark when racing; three
+  jury RIBs on the course.
+
+- [Start: no drifting astern, helm works in irons](20261110_2055_start-in-irons.md) —
+  boat held on station in the countdown; helm keys turn her the way they
+  say going astern, so she gets out of irons.
+
+- [Sail geometry reshaped in place](20261110_1718_sail-geometry-reuse.md) —
+  the Optimist sail's buffers are reused each frame instead of being
+  disposed and rebuilt.
+
+- [Faster 3D when racing](20261110_1701_racing-performance.md) —
+  Graphics selector (Auto follows the frame rate); fleet without shadows,
+  with distance detail levels; cheaper sea shader.
+
+- [Fleet on the force model; capsize, planing, daggerboard](20261110_1642_fleet-capsize-planing-daggerboard.md) —
+  fleet sails by `sailing.js`; she can capsize and plane; daggerboard on Q / E.
+
+- [Smooth boom under Auto sail](20261110_1614_smooth-boom.md) —
+  boom target no longer quantised to 1.5° steps; eases into place; 11° jump
+  on a broad reach removed.
+
 - [Sailing model and controls](20261110_1528_sailing-model-controls.md) —
   force-based sailing (`sailing.js`): momentum, leeway, heel and hiking,
   rudder that needs way on, gusts; mainsheet on ↑/↓ (W/S); rudder, leeway

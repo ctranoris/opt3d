@@ -135,8 +135,11 @@ function leechPoint(corner, peak, t, hollow) {
  * @param o        { camber, twist, hollow, luffSag, footSag, side, flutter, phase }
  *                 side: +1 bellies to +z (port of the cloth), -1 to -z.
  *                 flutter: amplitude (m) of a luffing ripple, phase its time.
+ * @param into     a geometry this function made earlier, to reshape in
+ *                 place instead of making a new one (no buffers allocated,
+ *                 nothing new sent to the graphics card but the numbers).
  */
-export function sailGeometry(corners, o = {}) {
+export function sailGeometry(corners, o = {}, into = null) {
   const {
     camber = 0.085, twist = 0.16, hollow = -0.045,
     luffSag = 0.035, footSag = 0.012,
@@ -144,7 +147,10 @@ export function sailGeometry(corners, o = {}) {
   } = o;
 
   const { tack, head, peak, corner } = corners;
-  const pos = [], nor = [], uv = [], idx = [];
+  const count = (SAIL_T + 1) * (SAIL_S + 1);
+  const pos = into ? into.attributes.position.array : new Float32Array(count * 3);
+  const uv = into ? into.attributes.uv.array : new Float32Array(count * 2);
+  let n = 0;
 
   // The sprit's trace across the face of the sail, in the same frame as
   // the corners: from the snotter on the mast to the peak.
@@ -225,11 +231,22 @@ export function sailGeometry(corners, o = {}) {
       const proud = (pz - face) * SPRIT_SIDE;
       if (proud > 0) pz -= near * proud * SPRIT_SIDE;
 
-      pos.push(px, py, pz);
-      nor.push(0, 0, 1);
-      uv.push(...sailUV(flatX, flatY));
+      pos[n * 3] = px; pos[n * 3 + 1] = py; pos[n * 3 + 2] = pz;
+      uv[n * 2] = 0.5 * (flatX - TEX_X0) / TEX_SPAN;   // as sailUV()
+      uv[n * 2 + 1] = (flatY - TEX_Y0) / TEX_SPAN;
+      n++;
     }
   }
+
+  if (into) {
+    into.attributes.position.needsUpdate = true;
+    into.attributes.uv.needsUpdate = true;
+    into.computeVertexNormals();      // refills the normals it already has
+    into.computeBoundingSphere();
+    return into;
+  }
+
+  const idx = [];
 
   const row = SAIL_S + 1;
   for (let j = 0; j < SAIL_T; j++) {
@@ -240,9 +257,8 @@ export function sailGeometry(corners, o = {}) {
   }
 
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   g.setIndex(idx);
   g.computeVertexNormals();
   return g;
@@ -845,8 +861,7 @@ export function updateRig(rig, p = {}) {
   const c = camber * (0.55 + 0.45 * sheetedIn) * (0.55 + 0.6 * wind) * (0.2 + 0.8 * full);
   const tw = twist * (0.45 + 0.75 * eased) * (0.6 + 0.7 * wind) * (0.3 + 0.7 * full);
 
-  rig.sail.geometry.dispose();
-  rig.sail.geometry = sailGeometry(rig.corners, {
+  sailGeometry(rig.corners, {
     camber: 0.085 * c,
     twist: 0.16 * tw,
     hollow: -0.045 - 0.03 * sheetedIn,
@@ -854,7 +869,7 @@ export function updateRig(rig, p = {}) {
     side: fill < 0 ? -1 : 1,
     flutter: (1 - full) * (0.01 + 0.035 * wind),
     phase: t * 14,
-  });
+  }, rig.sail.geometry);
 }
 
 /**

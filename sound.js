@@ -132,11 +132,26 @@ export function createSound() {
 
   /**
    * Race signals, synthesised: 'horn' (the 10 s warning), 'beep' (each of
-   * the last seconds) and 'gun' (the long start horn).
+   * the last seconds), 'gun' (the long start horn) and 'bump' (two hulls
+   * touching, `vol` 0..1).
    */
-  function signal(kind) {
+  function signal(kind, vol = 1) {
     if (!ctx || !enabled) return;
     const t0 = ctx.currentTime;
+    if (kind === 'bump') {
+      // hull on hull: a dull thud, a sine dropping from 150 Hz
+      const g = ctx.createGain(), o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(150, t0);
+      o.frequency.exponentialRampToValueAtTime(45, t0 + 0.18);
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.5 * clamp(vol, 0.2, 1), t0 + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
+      o.connect(g); g.connect(master);
+      o.start(t0); o.stop(t0 + 0.3);
+      played.push(kind); if (played.length > 20) played.shift();
+      return 1;
+    }
     const len = kind === 'gun' ? 1.1 : kind === 'horn' ? 0.6 : 0.12;
     const f = kind === 'beep' ? 880 : 233;
     const g = ctx.createGain();

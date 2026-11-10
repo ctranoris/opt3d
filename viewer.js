@@ -18,6 +18,8 @@ import {
 } from './scene-extras.js';
 import { createCourse } from './race-course.js';
 import { createFleet, FLEET_N } from './fleet.js';
+import { createJury } from './jury.js';
+import { makeBody, loadBody, bodyU, bodyV } from './collisions.js';
 import { createSailor } from './sailor.js';
 import { createMountains } from './mountains.js';
 import { createSound } from './sound.js';
@@ -349,6 +351,7 @@ const WATER_FS = /* glsl */`
   // factors (< 0 where there is no boat).
   uniform mat4 uFleetInv[${FLEET_N}];
   uniform float uFleetWake[${FLEET_N}];
+  uniform vec2 uFleetXZ[${FLEET_N}];        // where each one is, to skip the far ones cheaply
 
   // Break the summed white water up with noise that rides on the water.
   float foamTexture(float foam, vec3 w) {
@@ -376,6 +379,8 @@ const WATER_FS = /* glsl */`
     float wakeSum = wakeShape(b0, uWake);
     for (int i = 0; i < ${FLEET_N}; i++) {
       if (uFleetWake[i] < 0.0) continue;
+      vec2 away = vWorld.xz - uFleetXZ[i];
+      if (dot(away, away) > 400.0) continue;   // hull and wake are all within 20 m
       vec3 bi = (uFleetInv[i] * vec4(vWorld, 1.0)).xyz;
       if (insideHull(bi)) discard;
       wakeSum += wakeShape(bi, uFleetWake[i]);
@@ -443,7 +448,7 @@ ${RIPPLES.map(([deg, l]) => `    R(vec2(${Math.cos(deg * D2R).toFixed(5)}, ${Mat
 
 let renderer, scene, camera, controls, boat, water, sun, pmrem;
 let compass, windArrow, helm;
-let seaFrame, course, fleet, sailor, mountains;
+let seaFrame, course, fleet, jury, sailor, mountains;
 const sound = createSound();
 const MID = 1.15;   // midship, boat x: the heading turns about this point
 const state = {
@@ -538,7 +543,7 @@ function init() {
   }
   const app = document.getElementById('app');
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(MAX_PR * GFX_LEVELS[gfx.level].scale);
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -577,7 +582,8 @@ function init() {
   sun = new THREE.DirectionalLight(0xfff4e2, 2.6);
   sun.position.copy(sunDir).multiplyScalar(14);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(GFX_LEVELS[gfx.level].shadow || 1024, GFX_LEVELS[gfx.level].shadow || 1024);
+  sun.castShadow = !!GFX_LEVELS[gfx.level].shadow;
   sun.shadow.camera.near = 4;
   sun.shadow.camera.far = 30;
   const s = 3.6;
@@ -614,6 +620,7 @@ function init() {
       uSSS: { value: new THREE.Color(0x1d8a7e).multiplyScalar(0.55) },
       uFleetInv: { value: Array.from({ length: FLEET_N }, () => new THREE.Matrix4()) },
       uFleetWake: { value: new Array(FLEET_N).fill(-1) },
+      uFleetXZ: { value: Array.from({ length: FLEET_N }, () => new THREE.Vector2()) },
     },
     side: THREE.DoubleSide,
   });
@@ -663,7 +670,9 @@ function init() {
   course.group.visible = false;
   fleet = createFleet();
   fleet.group.visible = false;
-  seaFrame.add(course.group, fleet.group);
+  jury = createJury();
+  jury.group.visible = false;
+  seaFrame.add(course.group, fleet.group, jury.group);
   scene.add(seaFrame);
 
   addEventListener('resize', onResize);
@@ -725,8 +734,86 @@ function onResize() {
 const clock = new THREE.Clock();
 const tmpV = new THREE.Vector3();
 
+/* ------------------------------------------------------------------ *
+ * graphics quality
+ *
+ * Most of the cost of a frame is the sea (every pixel of it runs the
+ * water shader) and, with the fleet out, a thousand or so small parts to
+ * draw.  The levels below trade sharpness for speed: a lower rendering
+ * resolution, a smaller shadow map (none at the lowest), and the fleet's
+ * small parts dropped sooner.  On Auto the level follows the frame rate:
+ * down when it stays under about 40 a second, back up when there is
+ * plainly room.
+ * ------------------------------------------------------------------ */
+
+const MAX_PR = Math.min(devicePixelRatio || 1, 2);
+const GFX_LEVELS = [
+  { scale: 1.00, shadow: 2048, lod: 1.0 },
+  { scale: 0.80, shadow: 2048, lod: 0.8 },
+  { scale: 0.65, shadow: 1024, lod: 0.6 },
+  { scale: 0.50, shadow: 0, lod: 0.45 },
+];
+const GFX_MODES = { auto: null, best: 0, balanced: 1, fast: 3 };
+const GFX_KEY = 'opti-graphics';
+const gfx = { mode: 'auto', level: 0, ms: 16.7, slow: 0, quick: 0, ceiling: 0, ceilingUntil: 0, raisedAt: -1e9, fps: 60 };
+try {
+  const m = localStorage.getItem(GFX_KEY);
+  if (m in GFX_MODES) gfx.mode = m;
+  // on Auto, start where the last visit settled
+  const l = +localStorage.getItem(GFX_KEY + '-level');
+  if (gfx.mode === 'auto' && l >= 0 && l < GFX_LEVELS.length) gfx.level = l | 0;
+} catch (e) { /* no storage: start at the top */ }
+if (GFX_MODES[gfx.mode] != null) gfx.level = GFX_MODES[gfx.mode];
+
+function setGfxLevel(level) {
+  level = clamp(level, 0, GFX_LEVELS.length - 1);
+  if (level === gfx.level) return;
+  const was = GFX_LEVELS[gfx.level], L = GFX_LEVELS[level];
+  gfx.level = level;
+  renderer.setPixelRatio(Math.max(0.5, MAX_PR * L.scale));   // resizes the canvas too
+  if (L.shadow !== was.shadow) {
+    sun.castShadow = !!L.shadow;
+    if (L.shadow) sun.shadow.mapSize.set(L.shadow, L.shadow);
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  }
+  if (gfx.mode === 'auto') { try { localStorage.setItem(GFX_KEY + '-level', level); } catch (e) { /* ignore */ } }
+}
+
+function setGfxMode(mode) {
+  if (!(mode in GFX_MODES)) mode = 'auto';
+  gfx.mode = mode;
+  gfx.slow = gfx.quick = 0; gfx.ceiling = 0;
+  try { localStorage.setItem(GFX_KEY, mode); } catch (e) { /* ignore */ }
+  if (GFX_MODES[mode] != null) setGfxLevel(GFX_MODES[mode]);
+  if (ui.gfx) ui.gfx.value = mode;
+}
+
+/** Follow the frame rate (Auto only).  `raw` is the last frame's time in seconds. */
+function gfxWatch(raw, now) {
+  if (raw <= 0 || raw > 2 || document.hidden) { gfx.slow = gfx.quick = 0; return; }   // a stall or a hidden tab
+  // the slower the frames, the fewer there are to average over
+  gfx.ms += (Math.min(raw, 0.25) * 1000 - gfx.ms) * Math.min(0.5, 0.08 + raw * 2);
+  gfx.fps = 1000 / gfx.ms;
+  if (gfx.mode !== 'auto') return;
+  if (now > gfx.ceilingUntil) gfx.ceiling = 0;
+  gfx.slow = gfx.ms > 25 ? gfx.slow + raw : 0;        // under 40 a second
+  gfx.quick = gfx.ms < 18 ? gfx.quick + raw : 0;      // 55 or better
+  if (gfx.slow > 1.5 && gfx.level < GFX_LEVELS.length - 1) {
+    // if she was only just raised to here, don't try that again for a while
+    if (now - gfx.raisedAt < 15) { gfx.ceiling = gfx.level + 1; gfx.ceilingUntil = now + 180; }
+    setGfxLevel(gfx.level + 1);
+    gfx.slow = gfx.quick = 0; gfx.ms = 20;
+  } else if (gfx.quick > 8 && gfx.level > gfx.ceiling) {
+    setGfxLevel(gfx.level - 1);
+    gfx.raisedAt = now;
+    gfx.slow = gfx.quick = 0; gfx.ms = 20;
+  }
+}
+
 function animate() {
-  const dt = Math.min(0.05, clock.getDelta());
+  const rawDt = clock.getDelta();
+  const dt = Math.min(0.05, rawDt);
+  gfxWatch(rawDt, clock.elapsedTime);
   state.t += dt;
   const t = state.t;
 
@@ -752,16 +839,19 @@ function animate() {
   seaFrame.position.set(-odo.x, 0, -odo.y);
   if (state.course) {
     const me = new THREE.Vector2(MID + odo.x, odo.y);
-    raceInfo = course.update(dt, t, seaAt, trueFlow, state.wind, me);
+    raceInfo = course.update(dt, t, seaAt, trueFlow, state.wind, me, state.heading);
     raceSignals(raceInfo);
   }
-  if (state.fleet) fleet.update(dt, t, course, state.windFrom, state.wind, seaAt);
+  if (state.fleet) fleet.update(dt, t, course, state.windFrom, state.wind, seaAt, felt);
+  if (state.course) contacts(dt, t);
 
   // Float on the water.  The boat frame is +X aft, +Y up, +Z to port, so
   // heel is a rotation about X (+ heels to port) and pitch one about Z.
   helm.rotation.y = -(state.heading + 90) * D2R;
   const y0 = -BS.waterline;
   const heel = state.heel * D2R;
+  const lying = smoothstep(40, 88, Math.abs(state.heel));   // on her side: floating on the hull's flank
+  if (boat.board) boat.board.position.y = (1 - hull.board) * BOARD_TRAVEL;
   if (state.seaMotion) {
     // sample the sea under the midship, the bow and the stern, wherever
     // she happens to point
@@ -770,13 +860,13 @@ function animate() {
     const h = waveHeight(MID, 0, t);
     const hS = waveHeight(MID - bx * aft, -bz * aft, t);   // under the stern
     const hB = waveHeight(MID + bx * BS.mid, bz * BS.mid, t);    // under the bow
-    boat.group.position.y = y0 + h;
-    boat.group.rotation.z = Math.atan2(hS - hB, BS.loa) * 0.85;   // +z lifts the stern
-    boat.group.rotation.x = heel * (0.82 + 0.18 * Math.sin(t * 0.9));
-    boat.group.rotation.y = 0.03 * Math.sin(t * 0.4) - heel * 0.25;
+    boat.group.position.y = y0 + h + 0.14 * lying;
+    boat.group.rotation.z = Math.atan2(hS - hB, BS.loa) * 0.85 * (1 - lying);   // +z lifts the stern
+    boat.group.rotation.x = heel * (0.82 + 0.18 * Math.sin(t * 0.9) * (1 - lying) + 0.18 * lying);
+    boat.group.rotation.y = 0.03 * Math.sin(t * 0.4) - clamp(heel, -0.35, 0.35) * 0.25;
   } else {
-    boat.group.position.y = y0 + waveHeight(MID, 0, t) * 0.15;
-    boat.group.rotation.set(heel * 0.55, 0, 0);
+    boat.group.position.y = y0 + waveHeight(MID, 0, t) * 0.15 + 0.14 * lying;
+    boat.group.rotation.set(heel * (0.55 + 0.45 * lying), 0, 0);
   }
 
   // rig: trim the sail, then string the mainsheet to the cleat
@@ -801,10 +891,17 @@ function animate() {
   U.uWake.value = Math.min(1.2, (state.speed * 18) / 3);
   U.uBoatInv.value.copy(boat.group.matrixWorld).invert();
   seaFrame.updateMatrixWorld(true);
-  if (state.fleet) fleet.updateRigs(t, state.wind);
+  if (state.fleet) {
+    fleet.lod(camera.position, GFX_LEVELS[gfx.level].lod);
+    fleet.updateRigs(t, state.wind);
+  }
   fleet.boats.forEach((s, i) => {
     U.uFleetWake.value[i] = state.fleet ? Math.min(1.2, (s.speed * 18) / 3) : -1;
-    if (state.fleet) U.uFleetInv.value[i].copy(s.b.group.matrixWorld).invert();
+    if (state.fleet) {
+      const m = s.b.group.matrixWorld;
+      U.uFleetInv.value[i].copy(m).invert();
+      U.uFleetXZ.value[i].set(m.elements[12], m.elements[14]);
+    }
   });
 
   // the masthead vane shows the apparent wind
@@ -828,7 +925,9 @@ function animate() {
 
 const keys = new Set();
 const SHEET_RATE = 45;  // deg of boom a second
-const SAIL_KEYS = ['arrowleft', 'arrowright', 'a', 'd', 'arrowup', 'arrowdown', 'w', 's'];
+const SAIL_KEYS = ['arrowleft', 'arrowright', 'a', 'd', 'arrowup', 'arrowdown', 'w', 's', 'q', 'e'];
+const BOARD_RATE = 1.2;                              // of its travel a second
+const BOARD_TRAVEL = BS.key === 'laser' ? 0.55 : 0.42;   // m the daggerboard lifts
 addEventListener('keydown', (e) => {
   const el = document.activeElement;
   if (el && (el.tagName === 'INPUT' && el.type === 'text')) return;
@@ -868,6 +967,14 @@ function sheetInput(dt) {
   state.sheetOut = clamp(state.sheetOut + d * SHEET_RATE * dt, 0, 90);
 }
 
+/** The daggerboard keys: Q lifts it, E pushes it down. */
+function boardInput(dt) {
+  let d = 0;
+  if (keys.has('q')) d -= 1;
+  if (keys.has('e')) d += 1;
+  if (d) hull.board = clamp(hull.board + d * BOARD_RATE * dt, 0, 1);
+}
+
 /** Turn the bow, and swing the camera round with her so the view follows. */
 function turn(dh) {
   if (!dh) return;
@@ -878,6 +985,50 @@ function turn(dh) {
     v.applyAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
     v.x += MID;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * the jury boats, and boats touching
+ *
+ * With the course out there are three jury boats on the water, and every
+ * hull - ours, the fleet's, the jury's - is solid: they bump and are
+ * pushed apart (collisions.js).  Our own boat is the middle of the scene,
+ * so a shove on her moves the sea instead.
+ * ------------------------------------------------------------------ */
+
+const myBody = makeBody('you', BS.loa, BS.beam, 85, 'dinghy', MID - BS.loa / 2);
+const contact = { text: '', until: 0, count: 0 };
+
+function contacts(dt, t) {
+  const mx = MID + odo.x, mz = odo.y;
+  loadBody(myBody, mx, mz, state.heading, hull.u, hull.v);
+  myBody.tack = wrap180(state.heading - state.windFrom) < 0 ? -1 : 1;
+  myBody.held = heldAtStart || hull.capsized;
+  jury.update(dt, t, course, state.windFrom, state.wind, seaAt, trueFlow,
+    state.fleet ? fleet.boats.map((s) => s.body).concat(myBody) : [myBody]);
+  jury.loadBodies();
+  const bumps = fleet.collide(dt, course, state.windFrom, [myBody, ...jury.bodies], state.fleet);
+  jury.storeBodies();
+  if (myBody.hit) {
+    odo.x += myBody.x - myBody.x0; odo.y += myBody.z - myBody.z0;
+    hull.u = bodyU(myBody); hull.v = bodyV(myBody);
+    seaFrame.position.set(-odo.x, 0, -odo.y);
+  }
+  for (const c of bumps) {
+    const mine = c.a === myBody || c.b === myBody;
+    if (mine) {
+      const other = c.a === myBody ? c.b : c.a;
+      contact.text = `Contact with ${other.name}`;
+      contact.until = t + 3;
+      contact.count++;
+      sound.signal('bump', c.speed / 1.5);
+    } else {
+      // the others', quieter the further off
+      const d = Math.hypot(c.a.x - mx, c.a.z - mz);
+      if (d < 30) sound.signal('bump', 0.5 * (c.speed / 1.5) * (1 - d / 30));
+    }
+  }
+  contact.now = t;
 }
 
 /* ------------------------------------------------------------------ *
@@ -902,9 +1053,11 @@ function updateRaceHud() {
   } else if (r.phase === 'started') {
     html = r.ocs
       ? `<div class="big"><span class="ocs">OCS</span> &middot; ${fmtTime(r.time)}</div>go back below the start line, then start`
-      : `<div class="big">Go! &middot; ${fmtTime(r.time)}</div>cross the start line upwind &middot; ${go}`;
+      : `<div class="big">Go! &middot; ${fmtTime(r.time)}</div>` +
+        (state.twa < 35 ? 'bear away to fill the sail (A or D) &middot; ' : 'cross the start line upwind &middot; ') + go;
   } else if (r.phase === 'racing') {
-    html = `<div class="big">${r.label} &middot; ${fmtTime(r.time)}</div>${go}` +
+    html = `<div class="big">${r.label} &middot; ${fmtTime(r.time)}</div>` +
+      (r.penalty ? `<span class="ocs">Started outside the flags</span> &middot; turn a full circle, a tack and a gybe (${Math.abs(r.turn).toFixed(0)}&deg; of 360&deg;)<br>` : '') + go +
       `<div class="legs">${r.legs.map((n, i) =>
         `<span class="${i < r.next ? 'done' : i === r.next ? 'cur' : ''}">${n}</span>`).join('')}` +
       `<span class="${r.next >= r.legs.length ? 'cur' : ''}">F</span></div>`;
@@ -914,6 +1067,7 @@ function updateRaceHud() {
       (place ? ` &middot; ${ordinal(place)} of ${fleet.boats.length + 1}` : '') + '</div>' +
       (r.best != null ? `best ${fmtTime(r.best)} &middot; ` : '') + 'Re-lay the course to race again';
   }
+  if (contact.now < contact.until) html += `<div class="ocs">${contact.text}</div>`;
   if (raceHud._html !== html) { raceHud.innerHTML = html; raceHud._html = html; }
 }
 
@@ -961,6 +1115,8 @@ function updateRanking() {
 function layCourse(countdown = false) {
   course.layout(new THREE.Vector2(MID + odo.x, odo.y), state.windFrom, countdown);
   fleet.reset(course, state.windFrom);
+  jury.reset(course, state.windFrom);
+  contact.until = 0; contact.count = 0;
   raceInfo = null;
   lastCount = null;
   if (!countdown) return;
@@ -974,7 +1130,14 @@ function layCourse(countdown = false) {
   setHeading(state.windFrom);
   Object.assign(hull, newHullState());
   state.speed = 0; state.leewaySpeed = 0; state.heel = 0; state.fill = 0;
+  heldAtStart = true;
 }
+
+// Lined up for the start, the sailor holds her on station, head to wind,
+// as the fleet's do, instead of letting the wind carry her astern.  She is
+// let go at the gun, or as soon as the helm or the sheet is touched.
+let heldAtStart = false;
+const START_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's'];
 
 // race signals: a horn at 10 s, a beep each of the last 5, a long horn at the gun
 let lastCount = null;
@@ -993,6 +1156,7 @@ function setCourse(on) {
   state.course = on;
   if (on && !course.laid) layCourse();
   course.group.visible = on;
+  jury.group.visible = on;
   ui.course.checked = on;
   if (!on) setFleet(false);
 }
@@ -1036,6 +1200,7 @@ const hull = newHullState();           // speeds in m/s, see sailing.js
 const PHYS = sailParams(BS.key);
 const MS = 18 * KN;                    // m/s in one unit of `state.wind`
 const gustFlow = new THREE.Vector3();
+const felt = { gust: 1, shift: 0 };          // the gust and shift of the moment, shared with the fleet
 
 const trueFlow = new THREE.Vector3(), appFlow = new THREE.Vector3();
 const bowV = new THREE.Vector3(), portV = new THREE.Vector3();
@@ -1075,8 +1240,13 @@ function sailTrim(dt, t) {
   state.app = app;
   state.awa = app > 1e-5 ? Math.acos(clamp(ax / app, -1, 1)) / D2R : 0;
 
-  sheetInput(dt);
-  if (state.autoSail || state.freeBoom) {
+  felt.gust = gust; felt.shift = shift;
+  boardInput(dt);
+  if (!hull.capsized) sheetInput(dt);
+  if (hull.capsized) {
+    // on her side the sheet runs out; she comes up with the sail flagging
+    if (!state.autoSail) { state.freeBoom = true; state.sheetOut = 80; }
+  } else if (state.autoSail || state.freeBoom) {
     // boom to leeward; dead downwind it stays on the gybe she is on until
     // the wind is well round the back of the sail
     let side = az > 0 ? -1 : 1;                  // air going to port: boom to port
@@ -1085,7 +1255,8 @@ function sailTrim(dt, t) {
     if (state.autoSail) {
       // the angle that drives her hardest without overpowering the sailor
       want = bestBoom(PHYS, ax * MS, az * MS) + 1.5 * Math.sin(t * 0.83 + 1.1);
-      step = 70 * dt;                            // the boom swings across, not jumps
+      // the boom swings across, not jumps, and eases into place
+      step = Math.min(70, 4 * Math.abs(side * clamp(want, 0, 90) - state.boom) + 0.5) * dt;
     } else {
       // Sheet in hand: the wind carries the boom out as far as the sheet
       // lets it, and no further than streaming along the wind.
@@ -1098,11 +1269,13 @@ function sailTrim(dt, t) {
   }
 
   // The forces, and what they do to her (sailing.js works in m/s).
+  if (heldAtStart && (!state.course || course.race.phase !== 'countdown' || START_KEYS.some((k) => keys.has(k)))) heldAtStart = false;
   const f = stepBoat(hull, PHYS, ax * MS, az * MS, state.boom, helmInput(), dt);
+  if (heldAtStart) { hull.u = 0; hull.v = 0; hull.yawRate = 0; }
 
   // How the wind meets the cloth: its component across the sail's chord
   // fills it on one side or the other, or lets it shake.
-  const fillT = clamp(f.across / 0.35, -1, 1);
+  const fillT = hull.capsized ? 0 : clamp(f.across / 0.35, -1, 1);
   state.fill += clamp(fillT - state.fill, -6 * dt, 6 * dt);
 
   state.heel = hull.heel;
@@ -1299,12 +1472,22 @@ function updateReadout() {
   const side = windFromPort() ? 'port' : 'stbd';
   // leeway: how far her track falls off her heading; VMG: speed made good to windward
   const leeway = Math.abs(hull.u) > 0.15 ? Math.min(90, Math.abs(Math.atan2(hull.v, Math.abs(hull.u))) / D2R) : 0;
-  const vmg = (-(bowV.dot(trueFlow)) * hull.u - portV.dot(trueFlow) * hull.v) / KN;
+  // VMG: with a course out, speed made good toward the next thing to
+  // round (the start line, a mark, the gate, the finish); otherwise to windward
+  let vmg = (-(bowV.dot(trueFlow)) * hull.u - portV.dot(trueFlow) * hull.v) / KN;
+  let vmgTo = '';
+  if (state.course && raceInfo && raceInfo.phase !== 'done') {
+    const b = raceInfo.brg * D2R, gx = Math.sin(b), gz = -Math.cos(b);
+    vmg = ((bowV.x * gx + bowV.z * gz) * hull.u + (portV.x * gx + portV.z * gz) * hull.v) / KN;
+    vmgTo = ' to ' + (raceInfo.phase === 'racing' ? raceInfo.label.toLowerCase().replace('3s / 3p', '3') : 'start');
+  }
   readout.innerHTML =
     `<b>${kn} kn</b> wind from <b>${pad3(state.windFrom)}&deg; ${cardinal(state.windFrom)}</b><br>` +
     `heading <b>${pad3(state.heading)}&deg; ${cardinal(state.heading)}</b> &nbsp; TWA <b>${state.twa.toFixed(0)}&deg;</b> ${side}<br>` +
     `boom <b>${fmtBoom(state.boom)}</b> &nbsp; heel <b>${Math.abs(heel).toFixed(1)}&deg;</b> &nbsp; speed <b>${(state.speed * 18).toFixed(1)} kn</b><br>` +
-    `rudder <b>${fmtBoom(state.rudder)}</b> &nbsp; leeway <b>${leeway.toFixed(0)}&deg;</b> &nbsp; VMG <b>${vmg.toFixed(1)} kn</b><br>` +
+    `rudder <b>${fmtBoom(state.rudder)}</b> &nbsp; leeway <b>${leeway.toFixed(0)}&deg;</b> &nbsp; VMG${vmgTo} <b>${vmg.toFixed(1)} kn</b><br>` +
+    `board <b>${hull.board > 0.98 ? 'down' : hull.board < 0.02 ? 'up' : (hull.board * 100).toFixed(0) + '% down'}</b>` +
+    `${hull.capsized ? ' &nbsp; <b>CAPSIZED</b>' : hull.plane > 0.5 ? ' &nbsp; <b>planing</b>' : ''}<br>` +
     `LOA ${BS.loa.toFixed(2)} m &middot; beam ${BS.beam.toFixed(2)} m &middot; sail <b>${sailArea.toFixed(1)} m&sup2;</b>`;
 }
 
@@ -1361,6 +1544,11 @@ function bindUI() {
   ui.sailCountry = $('sailCountry'); ui.sailNumber = $('sailNumber');
 
   // Boat type: remembered in a cookie; the scene is rebuilt by a reload.
+  ui.gfx = $('gfx');
+  if (ui.gfx) {
+    ui.gfx.value = gfx.mode;
+    ui.gfx.addEventListener('change', () => setGfxMode(ui.gfx.value));
+  }
   ui.boatType = $('boatType');
   if (ui.boatType) {
     ui.boatType.value = BOAT_TYPE;
@@ -1644,6 +1832,8 @@ window.OPTi = {
   sound,
   get mountains() { return mountains; },
   get scene() { return scene; },
+  get renderer() { return renderer; },
+  gfx, setGfxMode, setGfxLevel,
   get camera() { return camera; },
   get controls() { return controls; },
   get water() { return water; },
@@ -1651,6 +1841,8 @@ window.OPTi = {
   get helm() { return helm; },
   get course() { return course; },
   get fleet() { return fleet; },
+  get jury() { return jury; },
+  contact, myBody,
   get raceInfo() { return raceInfo; },
   setHeading, setWindFrom, camFor, setCourse, setFleet, layCourse,
   CAMS,

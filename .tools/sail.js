@@ -1,6 +1,6 @@
 // Headless check of the sailing model in the real page: serves the repo,
-// sails her on a reach, puts the helm over, tacks and takes the sheet in
-// hand, printing the state after each step.
+// sails her on a reach, puts the helm over, tacks, takes the sheet in
+// hand and works the daggerboard, printing the state after each step.
 // usage: node .tools/sail.js [optimist|laser]
 const puppeteer = require('puppeteer');
 const http = require('http');
@@ -46,7 +46,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/ja
     const f = (v, d = 1) => (+v).toFixed(d);
     return `${label.padEnd(34)} t ${f(s.t)}  hdg ${f(s.heading, 0)}  twa ${f(s.twa, 0)}  boom ${f(s.boom, 0)}  ` +
       `kn ${f(s.speed * 18, 2)}  lee ${f(s.leewaySpeed * 18, 2)}  heel ${f(s.heel)}  hike ${f(s.hike, 2)}  ` +
-      `rud ${f(s.rudder, 0)}  fill ${f(s.fill, 2)}  auto ${s.autoSail}  free ${s.freeBoom}  out ${f(s.sheetOut, 0)}`;
+      `rud ${f(s.rudder, 0)}  fill ${f(s.fill, 2)}  auto ${s.autoSail}  free ${s.freeBoom}  out ${f(s.sheetOut, 0)}  board ${f(O.hull.board, 2)}${O.hull.capsized ? '  CAPSIZED' : ''}`;
   }, label, frames, keys);
 
   const steps = [
@@ -60,6 +60,9 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/ja
     ['coast with the sail flagging', 120],
     ['haul in again', 40, ['w']],
     ['sail on', 150],
+    ['lift the daggerboard', 30, ['q']],
+    ['sail on with it up', 80],
+    ['push it down', 30, ['e']],
   ];
   for (const [label, n, keys] of steps) console.log(await run(label, n, keys));
   console.log(msgs.length ? 'ERRORS:\n' + msgs.join('\n') : 'no console errors');

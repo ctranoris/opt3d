@@ -232,6 +232,15 @@
           <label class="chk"><input id="seaMotion" type="checkbox" checked>Sea motion</label>
         </div>
         <div class="row">
+          <label for="gfx">Graphics</label>
+          <select id="gfx" class="txt" title="Rendering quality. Auto follows the frame rate: it lowers the resolution, shadows and distant detail when the picture gets slow.">
+            <option value="auto">Auto</option>
+            <option value="best">Best</option>
+            <option value="balanced">Balanced</option>
+            <option value="fast">Fast</option>
+          </select>
+        </div>
+        <div class="row">
           <label for="boatType">Boat</label>
           <select id="boatType" class="txt" title="Boat type (remembered in a cookie; reloads the page)">
             <option value="optimist">Optimist</option>
@@ -298,7 +307,7 @@
         <b>Drag the sail</b> to swing the boom to either side, all the way round.
         Turntable turns the boat's heading. <b>&larr; / &rarr;</b> (or A / D) put the
         helm over: she needs way on to turn. <b>&uarr; / &darr;</b> (or W / S) haul
-        the mainsheet in and let it out.
+        the mainsheet in and let it out. <b>Q / E</b> lift the daggerboard and push it down.
         Orbit with the left button, zoom with the wheel.
       </div>
     </div>

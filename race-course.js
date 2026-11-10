@@ -13,6 +13,9 @@
  * line going upwind, round 1 and 2, pass through (or round either mark of)
  * the gate, then beat up and cross the finish line.  Over the line before
  * the gun (OCS), a boat has to dip back below it before it can start.
+ * The start is between the two flags: a boat that goes up past the line
+ * outside them has started, but owes a 360 degree turn, and no mark counts
+ * for her until she has made it.
  *
  * Everything here lives in water coordinates (x east, z south, metres),
  * fixed to the sea.  The viewer keeps its own boat in the middle of the
@@ -31,7 +34,11 @@ const D2R = Math.PI / 180;
 // upwind, rounded to starboard; 3P on the right, rounded to port), and a
 // short beat up to the finish.
 const PLAN = {
-  startHalf: 20,
+  // the row of boats is 40 m wide; the line runs on to the left of it,
+  // because a row going off on starboard tack slides that way before it
+  // gets up to the line
+  startLeft: 34, startRight: 20,
+  rowHalf: 20,
   startAhead: 6,               // start line this far upwind of the boat
   slots: 13,                   // boats in the row below the line; ours in the middle
   marks: [
@@ -47,9 +54,11 @@ const PLAN = {
 };
 // A bigger, faster boat gets a bigger course (start slots, legs and all).
 const K = BS.courseScale || 1;
-PLAN.startHalf *= K; PLAN.startAhead *= K; PLAN.finishHalf *= K;
-PLAN.finish = PLAN.finish.map((v) => v * K);
-for (const m of PLAN.marks) m.at = m.at.map((v) => v * K);
+// ... and the legs are a quarter longer than the plan above (the lines stay as they are).
+const LEGS = 1.25;
+PLAN.startLeft *= K; PLAN.startRight *= K; PLAN.rowHalf *= K; PLAN.startAhead *= K; PLAN.finishHalf *= K;
+PLAN.finish = PLAN.finish.map((v) => v * K * LEGS);
+for (const m of PLAN.marks) m.at = m.at.map((v) => v * K * LEGS);
 
 export const ROUND_RADIUS = 7 * K;   // pass this close to a mark to round it
 export const COUNTDOWN = 10;     // seconds from laying the course to the gun
@@ -261,8 +270,9 @@ export function createCourse() {
         S.x + u.x * du + r.x * dr, S.y + u.y * du + r.y * dr);
       const S = p0.clone().addScaledVector(u, PLAN.startAhead);
       this.up.copy(u);
-      this.start[0].copy(at(0, -PLAN.startHalf));
-      this.start[1].copy(at(0, PLAN.startHalf));
+      this.start[0].copy(at(0, -PLAN.startLeft));
+      this.start[1].copy(at(0, PLAN.startRight));
+      this._row = [at(-PLAN.startAhead, -PLAN.rowHalf), at(-PLAN.startAhead, PLAN.rowHalf)];
       pin.userData.w.copy(this.start[0]);
       committee.userData.w.copy(this.start[1]);
       PLAN.marks.forEach((m, i) => marks[i].userData.w.copy(at(...m.at)));
@@ -300,10 +310,9 @@ export function createCourse() {
 
     /** Water position of slot `i` of the row below the start line. */
     slot(i) {
-      const [a, b] = this.start;
+      const [a, b] = this._row;
       const f = (i + 0.5) / PLAN.slots;
-      return new THREE.Vector2(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
-        .addScaledVector(this.up, -PLAN.startAhead);
+      return new THREE.Vector2(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
     },
 
     /** Restart the race: with a countdown, or ('pre') start whenever. */
@@ -311,6 +320,9 @@ export function createCourse() {
       this.race.phase = countdown ? 'countdown' : 'pre';
       this.race.count = COUNTDOWN;
       this.race.ocs = false;
+      this.race.penalty = false;
+      this.race.turn = 0;
+      this._hdg = null;
       this.race.clock = 0;
       this.race.finish = null;
       this.race.next = 0;
@@ -330,6 +342,24 @@ export function createCourse() {
         (p1.x - p0.x) * this.up.x + (p1.y - p0.y) * this.up.y > 0;
     },
 
+    /**
+     * A boat going from p0 to p1 and the start line: 1 if she crossed it
+     * going upwind between the flags, -1 back down between them; 2 and -2
+     * the same outside the flags (across the line carried on past them); 0
+     * if she did not cross.
+     */
+    startCross(p0, p1) {
+      const a = this.start[0], b = this.start[1], up = this.up;
+      const d0 = (p0.x - a.x) * up.x + (p0.y - a.y) * up.y;
+      const d1 = (p1.x - a.x) * up.x + (p1.y - a.y) * up.y;
+      if ((d0 < 0) === (d1 < 0)) return 0;
+      const k = d0 / (d0 - d1);
+      const cx = p0.x + (p1.x - p0.x) * k - a.x, cy = p0.y + (p1.y - p0.y) * k - a.y;
+      const sx = b.x - a.x, sy = b.y - a.y;
+      const f = (cx * sx + cy * sy) / (sx * sx + sy * sy);
+      return (d1 > d0 ? 1 : -1) * (f >= 0 && f <= 1 ? 1 : 2);
+    },
+
     /** The fleet's waypoints round the course, by gate mark ('S' or 'P'). */
     route(side) { return this.routes[side]; },
 
@@ -343,7 +373,7 @@ export function createCourse() {
      * the world direction the true wind blows; `boatW` our boat's water
      * position.  Returns what the HUD needs.
      */
-    update(dt, t, seaH, flow, wind, boatW) {
+    update(dt, t, seaH, flow, wind, boatW, heading = null) {
       const yaw = Math.atan2(-flow.z, flow.x);
       for (const b of buoys) {
         const w = b.userData.w;
@@ -364,15 +394,23 @@ export function createCourse() {
       const p0 = this._prev || p1;
       this._prev = p1;
       if (R.phase !== 'countdown') R.clock += dt;
+      // the 360 she owes for starting outside the flags: the heading has to
+      // go right round, one way
+      if (R.penalty && heading != null && this._hdg != null) {
+        R.turn += ((heading - this._hdg) % 360 + 540) % 360 - 180;
+        if (Math.abs(R.turn) >= 355) { R.penalty = false; R.turn = 0; }
+      }
+      this._hdg = heading;
       if (R.phase === 'pre') {
-        // across the line going upwind starts the clock
-        const s = crossing(p0, p1, this.start[0], this.start[1]);
-        if (s && p1.clone().sub(p0).dot(this.up) > 0) { R.phase = 'racing'; R.next = 0; R.time = 0; }
+        // across the line going upwind starts the clock; outside the flags costs a turn
+        const s = this.startCross(p0, p1);
+        if (s > 0) { R.phase = 'racing'; R.next = 0; R.time = 0; R.penalty = s === 2; R.turn = 0; }
       } else if (R.phase === 'countdown' || R.phase === 'started') {
         // across the line: upwind before the gun is over early, back down
-        // clears it; upwind after the gun (and not OCS) is a start
-        const up = crossing(p0, p1, this.start[0], this.start[1])
-          ? Math.sign(p1.clone().sub(p0).dot(this.up)) : 0;
+        // clears it; upwind after the gun (and not OCS) is a start -
+        // a good one between the flags, one with a turn to make outside them
+        const sc = this.startCross(p0, p1), up = Math.sign(sc);
+        if (R.phase !== 'countdown' && up > 0 && !R.ocs) { R.penalty = sc === 2; R.turn = 0; }
         if (R.phase === 'countdown') {
           if (up > 0) R.ocs = true; else if (up < 0) R.ocs = false;
           R.count -= dt;
@@ -384,7 +422,9 @@ export function createCourse() {
         }
       } else if (R.phase === 'racing') {
         R.time += dt;
-        if (R.next < legs.length) {
+        if (R.penalty) {
+          // nothing counts until the turn is made
+        } else if (R.next < legs.length) {
           const leg = legs[R.next];
           const ms = leg.marks.map((k) => marks[k].userData.w);
           // round the mark (either gate mark), or sail through the gate
@@ -420,7 +460,7 @@ export function createCourse() {
       const label = R.next < legs.length
         ? (legs[R.next].gate ? `Gate ${legs[R.next].marks.map((i) => PLAN.marks[i].label).join(' / ')}` : `Mark ${legs[R.next].name}`)
         : 'Finish';
-      return { phase: R.phase, count: R.count, ocs: R.ocs, next: R.next, legs: legs.map((l) => l.name), label, time: R.time, best: R.best, dist, brg };
+      return { phase: R.phase, count: R.count, ocs: R.ocs, penalty: R.penalty, turn: R.turn, next: R.next, legs: legs.map((l) => l.name), label, time: R.time, best: R.best, dist, brg };
     },
   };
   return course;

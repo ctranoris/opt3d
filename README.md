@@ -226,8 +226,8 @@ through a Blender round trip.
 
 ## The viewer
 
-`index.html` + `viewer.js`, with `race-course.js` and `fleet.js` for the
-racing and `sailor.js` for the crew. Beyond the boat: a procedural sky with fair-weather cumulus feeding
+`index.html` + `viewer.js`, with `race-course.js`, `fleet.js`, `jury.js` and
+`collisions.js` for the racing and `sailor.js` for the crew. Beyond the boat: a procedural sky with fair-weather cumulus feeding
 image-based lighting, a custom shader sea (five Gerstner waves running
 downwind of the default northerly, with deep-water speeds and sharpened
 crests; per-pixel normals with fine ripples that fade out with distance;
@@ -235,6 +235,12 @@ the clouded sky reflected with fresnel; light through the wave crests;
 sun glitter; whitecaps from about 10 kn; a sea that builds with the
 wind; distance haze), soft shadows, and
 seven camera presets.
+
+To keep the racing quick on a modest graphics card, the fleet's boats
+cast no shadows (the shadow map only covers your own boat), drop their
+small fittings beyond about 11 m from the camera and more beyond 26 m, and
+the distant ones rebuild their sails every second or fourth frame; the sea
+shader skips the hulls and wakes of boats more than 20 m from the pixel.
 
 **Controls**
 
@@ -244,6 +250,7 @@ seven camera presets.
 | **Wind from** | compass bearing the true wind blows from (0° = north); moves the wind arrow |
 | **Heading** | compass course of the bow; turns the boat on the compass rose |
 | **Wind** | breeze strength — drives heel, sail load and luff sag |
+| **Graphics** | rendering quality: **Auto** (the default) follows the frame rate, lowering the rendering resolution, then the shadows, when the picture stays under about 40 frames a second, and going back up when there is plainly room; **Best**, **Balanced** and **Fast** fix it. Remembered between visits |
 | **Draft** | how deep the sail is foiled |
 | **Auto sail** | puts the boom out to leeward at the angle that drives her hardest, easing it when she is overpowered, and gybing across when the wind changes side |
 | **Sea motion** | float her on the waves |
@@ -255,11 +262,12 @@ seven camera presets.
 | **Sailor** | a young sailor in each boat, on the windward side (opposite the boom), hiking harder as she heels; the girls in the fleet have longer hair with a ponytail that swings under gravity; left out of the `.glb` export |
 | **Islands** | four low, hazy islands far off on the horizon (640–820 m away, rising about 1° above it), with open sea between them (`mountains.js`) |
 | **Sound** | recordings from `sounds/` (`sound.js`): water that rises with boat speed, the sail flapping when it luffs, wind in the rig, the mainsheet running when the boom moves, and the sail filling after a tack or gybe; starts on the first click or key press, fades as the camera pulls back |
-| **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys |
+| **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys; three jury boats come out with it |
 | **Fleet** | twelve more boats of the same type racing round the marks: GRE 1062, 105, 1054 and 1055 (girls), and 1057, 1058, 128, 3153, 1052, 2737, 2828 and 2628 (boys); turns the course on |
-| **Re-lay course** | lays the course again for the wind and position you have now and starts a 10 s countdown: all 13 boats, yours in the middle, are lined up about 3 m apart, 6 m below the 40 m start line, head to wind. A horn sounds at 10 s, a beep each of the last 5 seconds, and a long horn at the gun |
+| **Re-lay course** | lays the course again for the wind and position you have now and starts a 10 s countdown: all 13 boats, yours in the middle, are lined up about 3 m apart, 6 m below the start line, head to wind. The line is 54 m long and runs on 14 m to the left of the row, the way a row going off on starboard tack slides. Yours is held on station through the countdown, like the fleet's, until the gun or until you touch the helm or the sheet; at the gun bear away (A or D) to fill the sail. A horn sounds at 10 s, a beep each of the last 5 seconds, and a long horn at the gun |
 | **← / → or A / D** | the helm: puts the rudder over (up to 35°), and the camera swings round with her. She turns with the water flowing past the rudder, so the faster she goes the quicker she turns; stopped, she can only be sculled round slowly (12°/s). Hands off, the sailor holds her course |
 | **↑ / ↓ or W / S** | the mainsheet: haul in, let out (45°/s). This turns Auto sail off and takes the sheet in hand: the boom is free to swing to leeward as far as the sheet lets it, and streams along the wind when the sheet is slack. Moving the Mainsheet slider or dragging the sail holds the boom where you put it instead |
+| **Q / E** | the daggerboard: lift it, push it down (its full travel in under a second). Up, she has less drag and heels less, but slips to leeward |
 
 **Drag the sail** in the viewport to swing the boom to any angle on either
 side. Orbit with the left button, zoom with the wheel.
@@ -268,7 +276,14 @@ side. Orbit with the left button, zoom with the wheel.
 trims for you, or take the sheet yourself with ↑ / ↓). Bear away to gather
 way before you tack, and keep the helm over until she is through the wind. After **Re-lay course**, the clock starts at the gun; cross
 the start line going upwind after it. Over the line before the gun (OCS), you
-have to dip back below it before you can start. When the course is first
+have to dip back below it before you can start. The start is between
+the two orange flags: go up past the line outside them and you have
+started, but you owe a 360° turn - a full circle, a tack and a gybe, either
+way round. The race panel says so in red and counts the degrees, and no
+mark (nor the finish) counts until the circle is made. The fleet sails by
+the same rule: a boat whose tack would take her past an end of the line
+takes the other one, and one that still starts outside the flags turns her
+circle (about 15 s in 8 kn) before she goes on. When the course is first
 switched on there is no countdown: crossing the line starts the clock. Then
 sail Start – 1 – 2 – 3S/3P – Finish, the rounding order of the Optimist
 Worlds course (`init_assets/example_course.png`):
@@ -289,15 +304,17 @@ countdown). The winner's time is shown in full and the others as the gap
 behind the winner. Your row is highlighted, and the race panel shows your
 place, for example "6th of 13". The ranking is cleared when you re-lay the
 course. The course
-(start 12 m upwind of the boat):
+(start line 6 m upwind of the boat; the legs a quarter longer than they
+were, 105 m of beat to mark 1; all of it 1.6 times bigger for the ILCA):
 
 | | metres upwind of the start | metres right (looking upwind) |
 |---|---|---|
-| Mark 1 (windward) | 60 | 0 |
-| Mark 2 | 50 | −40 |
-| Gate 3S | 2 | −49 |
-| Gate 3P | 2 | −39 |
-| Finish (middle, 12 m long) | 30 | −37, square to the wind |
+| Start line (54 m long) | 0 | −34 to 20 |
+| Mark 1 (windward) | 105 | 0 |
+| Mark 2 | 87.5 | −70 |
+| Gate 3S | 3.75 | −76.25 |
+| Gate 3P | 3.75 | −63.75 |
+| Finish (middle, 14 m long) | 52.5 | −62.5, square to the wind |
 
 **The sailor** sits on the side deck opposite the boom: boom to starboard
 puts them on the port side, boom to port on the starboard side. While the
@@ -311,16 +328,42 @@ about 1.3 s, changing hands on the way. The pose is procedural: the
 pelvis, neck, feet and hands are placed from the side and the hiking, and
 the knees and elbows come from two-bone IK.
 
-The fleet sails the same small model as your boat. Each boat follows a
+The fleet sails by the same force model as your boat (`sailing.js`), in
+the same gusts and shifts, each with a helm on its tiller that trims like
+Auto sail and lifts the daggerboard off the wind. They start stopped and
+head to wind like you, have to gather way and carry it through their
+tacks, and plane on the reaches in a blow. Some get a little less out of
+their sail than others (up to 14% in speed). Each boat follows a
 route of waypoints: up the right of mark 1 and round it to port on the
 outside, over the top of mark 2 and round its outside, down through the
 middle of the gate, round 3P (to port) or 3S (to starboard, every other
 boat) below it, then a beat up across the finish line, where its time
-is taken for the ranking and it stops head to wind. It points at its next waypoint, and beats at 60° to the
-wind (about the best upwind VMG for the viewer's speed polar) when the
+is taken for the ranking; it then clears the line for a place in the rows
+just above it and waits there head to wind. It steers for its next waypoint, and beats at 58° to the
+wind (about the best upwind VMG) when the
 waypoint is too close to the wind to point at. It tacks on the layline,
 with the odd tack up the middle. Each boat leaves its own wake, and
 the sea is masked out of its hull.
+
+**Contact.** With the course out every hull is solid - yours, the
+fleet's and the jury boats' (`collisions.js`: each hull is a capsule seen
+from above). Boats that touch are pushed apart, the lighter one further,
+lose the speed they had toward each other and a little more, and make a
+thud; when it is you, the race panel says who you touched for three
+seconds. There are no penalties. The fleet tries to keep clear by the
+simplest of the rules: port tack gives way to starboard, on the same tack
+the windward boat keeps clear, and everybody keeps clear of the jury
+boats and of boats that are stopped or capsized. The give-way boat ducks
+the other's stern or holds off, and nobody tacks without room. They all
+go off on starboard tack at the gun. It does not always work: in a twelve
+boat race there are still some five bumps a minute, most of them at the
+start and at the marks. They do not give you room at the marks either.
+
+**Jury boats** (`jury.js`). Three grey RIBs, two judges in each and a
+yellow JURY flag: one follows the fleet round the course about 16 m
+astern of the pack (or of you, sailing alone), one lies off the windward
+mark, one off the right-hand end of the finish line. They stop for a
+dinghy close ahead. They only watch: no whistles, no flags, no wake.
 
 The sail responds to the wind: a small model works out the true and
 apparent wind angles from the course, fills the cloth on the side the wind
@@ -335,27 +378,45 @@ the force on the sail.
   square to the wind on a run it works by drag alone.
 - **Momentum.** She has mass, so she takes a few seconds to gather way and
   carries it through a tack. Head to wind the sail only drags, and she
-  stops and then drifts astern: in irons. Scull her round with the helm.
+  stops and then drifts astern: in irons. Scull her round with the helm:
+  A or D turns her that way whether she is stopped, going ahead or astern.
 - **Leeway.** The daggerboard holds her against the side force only when
   she is moving. Close-hauled she slips 4–7° to leeward; stopped with the
   sail sheeted in, she goes sideways.
 - **Heel and hiking.** The side force heels her against the hull's
   stiffness and the sailor's weight. The sailor hikes as far as is needed,
   a moment late, so a gust heels her before she comes flat again. Above
-  about 16 kn close-hauled the sailor is fully out and she heels on; Auto
-  sail eases the sheet to hold her.
+  about 14 kn close-hauled the sailor is fully out; Auto sail eases the
+  sheet to hold her.
+- **Capsize.** The hull's stiffness falls away past about 12° of heel. Hold
+  the sheet in through a gust in 16 kn or more and she goes over: past 45°
+  there is no saving her. She lies on her side drifting to leeward for 5 s,
+  then the sailor has her up again, stopped, with the sheet run out. Auto
+  sail does not capsize her.
+- **Planing.** Near hull speed (about 3.6 kn for the Optimist) she digs a
+  hole in the water and the resistance humps up by half. With wind enough,
+  about 16 kn on a reach, and the boat flat, she climbs over the hump and
+  planes at 7–8 kn; heeled more than 8° she starts to fall off the plane.
+  The readout says when she is planing.
+- **Daggerboard.** Raised (Q), she has 7% less resistance and a shorter
+  lever to heel her, but only a third of the grip: close-hauled she loses a
+  tenth of her speed and slips much further to leeward; on a run she gains
+  2–3%, and up to 10% in a blow. The board lifts in the model, and the
+  readout shows where it is.
 - **Rudder.** It needs flow to work, it slows her when it is over, and it
-  works backwards when she is going astern. Heeled, she wants to luff up
+  works backwards when she is going astern; the sailor then puts the tiller
+  the other way, so the helm keys always turn her the way they say (you can
+  see the blade go over the "wrong" way). Heeled, she wants to luff up
   (weather helm); with hands off the keys the sailor holds a few degrees of
   rudder against it, which you can see on the blade and in the readout.
 - **Gusts and shifts.** The wind she feels varies by about 15% in strength
-  and 5° in direction. The fleet sails in the steady wind.
+  and 5° in direction, the same for every boat on the course.
 
 An Optimist in 8 kn of wind makes about 3.3 kn on a beam reach, 2.6 kn
-close-hauled at 60° to the true wind (her best course to windward, as for
-the fleet) and 2.5 kn on a run. A tack takes about 5 s and costs two thirds
-of her speed. `node .tools/polar.mjs` prints the full table next to the
-fleet's polar.
+close-hauled at 60° to the true wind (her best course to windward) and
+2.5 kn on a run; in 18 kn she planes on a reach at nearly 8 kn. A tack
+takes about 5 s and costs two thirds of her speed. `node .tools/polar.mjs`
+prints the full table, with the board down and up.
 
 She makes way at that speed, and to leeward by her leeway: the boat stays in the
 middle of the compass rose and the sea moves past her (the waves and the
@@ -363,7 +424,9 @@ foam drift astern), with white water drawn in the water shader - a bow
 wave, foam along her sides, churned water off the transom and the two arms
 of the wake - all growing with her speed. The readout shows the wind, heading, true wind angle,
 boom angle, heel and speed, then the rudder angle, the leeway and the VMG
-(speed made good to windward, negative downwind); the masthead vane points
+(speed made good to windward, negative downwind; with the course out it is
+the speed made good toward the next thing to round and says which: `VMG to
+start`, `to mark 1`, `to mark 2`, `to gate 3`, `to finish`); the masthead vane points
 into the apparent wind.
 
 By default the wind is from the north and she heads west, so it comes over
@@ -472,8 +535,9 @@ Verification scripts live in `.tools/` and drive headless Chrome
 | `.tools/inspect.mjs` | geometry audit — degenerate triangles and bounds per mesh |
 | `.tools/parts.js` | hides one named part and screenshots, for identifying geometry |
 | `.tools/xray.js` | renders with the sail hidden, to inspect the spars |
-| `.tools/polar.mjs` | prints the sailing model's speed polar next to the fleet's (plain Node, no browser) |
-| `.tools/sail.js` | sails her in the real page with the keys (reach, luff, tack, sheet in and out) and prints the state; serves the repo itself |
+| `.tools/polar.mjs` | prints the sailing model's speed polar, with how far she planes and the speed with the board up (plain Node, no browser) |
+| `.tools/sail.js` | sails her in the real page with the keys (reach, luff, tack, sheet in and out, daggerboard) and prints the state; serves the repo itself |
+| `.tools/fleet-race.js` | sails the fleet round the course in the real page without rendering, in gusts, and with the jury boats out and the hulls solid, and prints the bumps and each boat's finish time, top speed, time planing and capsizes and 360s: `node .tools/fleet-race.js [optimist\|laser] [wind kn]` |
 
 `shot.js` waits on camera-position stability and rendered frames rather than
 fixed delays, because software GL runs at a few frames a second and the
@@ -502,8 +566,8 @@ entry point.
   apparent wind.
 - **The sailing model is a simple one.** `sailing.js` balances forces in
   the horizontal plane with coefficients tuned by hand to give plausible
-  speeds, not measured ones. She cannot capsize (heel stops at 42°), does
-  not plane, and the daggerboard is always down. The fleet still sails the
-  older speed polar, so your boat and the fleet's are only roughly matched:
-  yours is a little faster to windward, level on a reach and about 15%
-  slower on a run.
+  speeds, not measured ones. The capsize is a set piece (over, 5 s on her
+  side, up again; she never turns turtle and the sailor stays aboard),
+  planing is a drop in resistance with no change of trim, and there is no
+  fore-and-aft trim, no waves pushing her about and no wind shadow between
+  boats. The wind stops at 18 kn.
