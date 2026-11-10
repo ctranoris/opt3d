@@ -232,8 +232,9 @@ image-based lighting, a custom shader sea (five Gerstner waves running
 downwind of the default northerly, with deep-water speeds and sharpened
 crests; per-pixel normals with fine ripples that fade out with distance;
 the clouded sky reflected with fresnel; light through the wave crests;
-sun glitter; whitecaps from about 10 kn; a sea that builds with the
-wind; distance haze), soft shadows, and
+sun glitter; whitecaps from 7 kn, more of them as it blows up; a sea that builds with the
+wind in steps - nearly flat up to 6 kn, waves at 7-10 kn, stronger at
+11-16 kn and stronger again at 17-21 kn; distance haze), soft shadows, and
 seven camera presets.
 
 To keep the racing quick on a modest graphics card, the fleet's boats
@@ -264,6 +265,7 @@ shader skips the hulls and wakes of boats more than 20 m from the pixel.
 | **Sound** | recordings from `sounds/` (`sound.js`): water that rises with boat speed, the sail flapping when it luffs, wind in the rig, the mainsheet running when the boom moves, and the sail filling after a tack or gybe; starts on the first click or key press, fades as the camera pulls back |
 | **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys; three jury boats come out with it |
 | **Fleet** | twelve more boats of the same type racing round the marks: GRE 1062, 105, 1054 and 1055 (girls), and 1057, 1058, 128, 3153, 1052, 2737, 2828 and 2628 (boys); turns the course on |
+| **Laylines** | dashed lines on the water to mark 1, the gate and the finish, green for starboard tack and red for port; turns the course on. To windward they run down and out from the target at 61° to the wind (the fleet's close-hauled heading plus leeway): reach one and you can tack and fetch the mark without another tack. At the finish the red one comes from the left end of the line and the green one from the right end, so anywhere between them you can cross. At the gate they run up from its middle at 15° either side of dead downwind (25° for the ILCA): the angle to gybe at. They follow the Wind from slider, not the gusts' shifts |
 | **Re-lay course** | lays the course again for the wind and position you have now and starts a 10 s countdown: all 13 boats, yours in the middle, are lined up about 3 m apart, 6 m below the start line, head to wind. The line is 54 m long and runs on 14 m to the left of the row, the way a row going off on starboard tack slides. Yours is held on station through the countdown, like the fleet's, until the gun or until you touch the helm or the sheet; at the gun bear away (A or D) to fill the sail. A horn sounds at 10 s, a beep each of the last 5 seconds, and a long horn at the gun |
 | **← / → or A / D** | the helm: puts the rudder over (up to 35°), and the camera swings round with her. She turns with the water flowing past the rudder, so the faster she goes the quicker she turns; stopped, she can only be sculled round slowly (12°/s). Hands off, the sailor holds her course |
 | **↑ / ↓ or W / S** | the mainsheet: haul in, let out (45°/s). This turns Auto sail off and takes the sheet in hand: the boom is free to swing to leeward as far as the sheet lets it, and streams along the wind when the sheet is slack. Moving the Mainsheet slider or dragging the sail holds the boom where you put it instead |
@@ -570,4 +572,4 @@ entry point.
   side, up again; she never turns turtle and the sailor stays aboard),
   planing is a drop in resistance with no change of trim, and there is no
   fore-and-aft trim, no waves pushing her about and no wind shadow between
-  boats. The wind stops at 18 kn.
+  boats. The wind stops at 21 kn.

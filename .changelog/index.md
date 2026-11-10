@@ -4,6 +4,21 @@ Log of completed actions on the Optimist 3D viewer. Newest first.
 
 ## 2026-11-10
 
+- [Whitecaps from 7 kn, slightly stronger](20261110_2314_whitecaps-from-7kn.md) —
+  whitecaps begin at 7 kn instead of 9 and build to a higher level at 21 kn.
+
+- [Sea state in three wind bands; wind up to 21 kn](20261110_2307_sea-state-by-wind-band.md) —
+  waves at 7-10 kn, stronger at 11-16 kn, stronger again at 17-21 kn;
+  the Wind slider now reaches 21 kn.
+
+- [Sea showing inside the opponents' boats](20261110_2250_water-in-fleet-boats.md) —
+  a fleet boat going astern was taken for absent by the sea shader, which
+  then drew the water through her hull; wake factor clamped at zero.
+
+- [Laylines to mark 1, the gate and the finish](20261110_2242_laylines.md) —
+  a Laylines checkbox draws them on the water, green for starboard tack,
+  red for port.
+
 - [Start between the flags or a 360; course 25% longer](20261110_2149_start-flags-360-longer-course.md) —
   starting outside the two start flags costs a full turn, for us and the
   fleet; start line carried on to the left; all legs a quarter longer.

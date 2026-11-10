@@ -389,7 +389,7 @@ export function createFleet() {
           if (!b.hit) continue;
           s.w.x += b.x - b.x0; s.w.y += b.z - b.z0;
           s.hull.u = bodyU(b); s.hull.v = bodyV(b);
-          s.holder.position.set(s.w.x, 0, s.w.y);
+          s.holder.position.x = s.w.x; s.holder.position.z = s.w.y;      // (not y: she stays on her wave)
         }
         for (const c of bumps) for (const b of [c.a, c.b]) { const s = boats.find((q) => q.body === b); if (s) s.contacts++; }
       }

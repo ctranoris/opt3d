@@ -191,7 +191,14 @@ const odo = new THREE.Vector2();
 // Sea state: the wave heights scale with the wind, eased so the sea
 // builds and dies down over a few seconds.
 let seaK = 0.87;
-const seaTarget = () => 0.6 + 0.6 * state.wind;
+// It comes in steps, by the wind in knots: under 7 kn a slight sea that
+// grows a little with the breeze; 7-10 kn proper waves; 11-16 kn bigger
+// ones; 17-21 kn bigger again.  Each step comes in over one knot.
+const seaTarget = () => {
+  const kn = state.wind * 18;
+  return 0.45 + 0.04 * Math.min(kn, 6) +
+    0.31 * smoothstep(6, 7, kn) + 0.5 * smoothstep(10, 11, kn) + 0.5 * smoothstep(16, 17, kn);
+};
 
 /** Water surface height at a world point - mirrored in the shader. */
 function waveHeight(x, z, t) {
@@ -887,8 +894,10 @@ function animate() {
   U.uTime.value = t;
   seaK += (seaTarget() - seaK) * Math.min(1, dt / 4);
   U.uSea.value = seaK;
-  U.uCaps.value = smoothstep(0.5, 1.0, state.wind) * 0.85;
-  U.uWake.value = Math.min(1.2, (state.speed * 18) / 3);
+  // whitecaps: the first few at 7 kn, building to the top of the wind range
+  const capKn = state.wind * 18;
+  U.uCaps.value = 0.35 * smoothstep(6, 8, capKn) + 0.65 * smoothstep(8, 21, capKn);
+  U.uWake.value = clamp((state.speed * 18) / 3, 0, 1.2);
   U.uBoatInv.value.copy(boat.group.matrixWorld).invert();
   seaFrame.updateMatrixWorld(true);
   if (state.fleet) {
@@ -896,7 +905,7 @@ function animate() {
     fleet.updateRigs(t, state.wind);
   }
   fleet.boats.forEach((s, i) => {
-    U.uFleetWake.value[i] = state.fleet ? Math.min(1.2, (s.speed * 18) / 3) : -1;
+    U.uFleetWake.value[i] = state.fleet ? clamp((s.speed * 18) / 3, 0, 1.2) : -1;   // (never negative going astern: below 0 means "no boat", and the sea would fill her)
     if (state.fleet) {
       const m = s.b.group.matrixWorld;
       U.uFleetInv.value[i].copy(m).invert();
@@ -1150,6 +1159,13 @@ function raceSignals(r) {
     else if (c <= 5) sound.signal('beep');
   } else if (lastCount === null && c === 10) sound.signal('horn');
   lastCount = c;
+}
+
+/** Laylines to mark 1, the gate and the finish; they need the course, so it comes out too. */
+function setLaylines(on) {
+  course.setLaylines(on);
+  ui.lay.checked = on;
+  if (on && !state.course) setCourse(true);
 }
 
 function setCourse(on) {
@@ -1641,6 +1657,8 @@ function bindUI() {
   ui.course = $('courseChk'); ui.fleet = $('fleetChk');
   ui.course.addEventListener('change', () => setCourse(ui.course.checked));
   ui.fleet.addEventListener('change', () => setFleet(ui.fleet.checked));
+  ui.lay = $('layChk');
+  ui.lay.addEventListener('change', () => setLaylines(ui.lay.checked));
   $('relay').addEventListener('click', () => {
     if (!state.course) setCourse(true);
     layCourse(true);
@@ -1844,7 +1862,7 @@ window.OPTi = {
   get jury() { return jury; },
   contact, myBody,
   get raceInfo() { return raceInfo; },
-  setHeading, setWindFrom, camFor, setCourse, setFleet, layCourse,
+  setHeading, setWindFrom, camFor, setCourse, setFleet, setLaylines, layCourse,
   CAMS,
   /** Resolves after `n` rendered frames - the only reliable way to wait
    *  for a state change to reach the screen under a slow software GL. */

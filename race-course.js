@@ -60,6 +60,13 @@ PLAN.startLeft *= K; PLAN.startRight *= K; PLAN.rowHalf *= K; PLAN.startAhead *=
 PLAN.finish = PLAN.finish.map((v) => v * K * LEGS);
 for (const m of PLAN.marks) m.at = m.at.map((v) => v * K * LEGS);
 
+// Laylines: the course a boat makes good close-hauled (heading plus a little
+// leeway), and the angle she runs at, degrees off the wind.
+const LAY_UP = 61;
+const LAY_DOWN = BS.key === 'optimist' ? 165 : 155;
+const LAY_LEN = { mark: 75 * K, gate: 65 * K, finish: 50 * K };
+const STBD_COL = 0x35e06a, PORT_COL = 0xff4d4d;
+
 export const ROUND_RADIUS = 7 * K;   // pass this close to a mark to round it
 export const COUNTDOWN = 10;     // seconds from laying the course to the gun
 
@@ -234,6 +241,23 @@ export function createCourse() {
     return ring;
   });
 
+  // laylines to mark 1, the gate and the finish: green for the starboard
+  // tack (or gybe) one, red for the port one
+  const lay = new THREE.Group();
+  lay.name = 'Laylines';
+  lay.visible = false;
+  const layLines = [0, 1, 2].map(() => [dashedLine(STBD_COL), dashedLine(PORT_COL)]);
+  for (const pair of layLines) for (const l of pair) { l.material.dashSize = 1.6; l.material.gapSize = 1.0; l.material.opacity = 0.9; lay.add(l); }
+  group.add(lay);
+  let layWind = null;
+  const _e = new THREE.Vector2();
+  /** One layline: from `p`, back along the course of a boat at `off` degrees from the wind. */
+  function layline(line, p, windDeg, off, len) {
+    const h = (windDeg + off) * D2R;
+    _e.set(p.x - Math.sin(h) * len, p.y + Math.cos(h) * len);
+    setLine(line, p, _e, 0.11);
+  }
+
   const buoys = [pin, committee, ...marks, ...fin];
   const flagBuoys = [pin, committee, ...fin];
   buoys.forEach((b, i) => { b.userData.w = new THREE.Vector2(); b.userData.phase = i * 1.7; });
@@ -304,6 +328,7 @@ export function createCourse() {
         P: [...common, m(3, -4, 1), m(3, 0, 5), ...over],     // left turn round 3P
         S: [...common, m(2, -4, -1), m(2, 0, -5), ...over],   // right turn round 3S
       };
+      layWind = null;
       this.laid = true;
       this.reset(countdown);
     },
@@ -328,6 +353,31 @@ export function createCourse() {
       this.race.next = 0;
       this.race.time = 0;
       this._prev = null;
+    },
+
+    /** Show or hide the laylines. */
+    setLaylines(on) { lay.visible = on; layWind = null; },
+    get laylines() { return lay.visible; },
+
+    /**
+     * Lay the laylines for the wind as it is now.  To windward (mark 1,
+     * the finish) they run down and out from the target: on the green one
+     * a boat close-hauled on starboard tack just fetches it, on the red one
+     * a boat on port.  At the finish they come from the two ends of the
+     * line, the port tack one from the left end and the starboard one from
+     * the right, so anywhere between them she can cross.  At the gate they
+     * run up from its middle: the angle to gybe at on the run.
+     */
+    layLaylines(windDeg) {
+      layWind = windDeg;
+      const m1 = marks[0].userData.w;
+      layline(layLines[0][0], m1, windDeg, -LAY_UP, LAY_LEN.mark);      // starboard tack: heading left of the wind
+      layline(layLines[0][1], m1, windDeg, LAY_UP, LAY_LEN.mark);
+      const gate = this.legPoint(2);
+      layline(layLines[1][0], gate, windDeg, LAY_DOWN, LAY_LEN.gate);   // starboard gybe: wind over the starboard quarter
+      layline(layLines[1][1], gate, windDeg, -LAY_DOWN, LAY_LEN.gate);
+      layline(layLines[2][0], this.finish[1], windDeg, -LAY_UP, LAY_LEN.finish);
+      layline(layLines[2][1], this.finish[0], windDeg, LAY_UP, LAY_LEN.finish);
     },
 
     /** Where a leg ends: the mark, or the middle of a gate. */
@@ -386,6 +436,11 @@ export function createCourse() {
       for (const b of flagBuoys) {
         b.userData.fly.rotation.y = yaw - b.rotation.y;
         waveFlag(b.userData.flag, t, wind, b.userData.phase);
+      }
+
+      if (lay.visible) {
+        const windDeg = Math.atan2(-flow.x, flow.z) / D2R;      // where the wind comes from
+        if (layWind === null || Math.abs(windDeg - layWind) > 0.05) this.layLaylines(windDeg);
       }
 
       // ---- the race ----
