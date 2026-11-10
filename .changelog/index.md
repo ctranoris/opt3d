@@ -2,6 +2,13 @@
 
 Log of completed actions on the Optimist 3D viewer. Newest first.
 
+## 2026-11-10
+
+- [Sailing model and controls](20261110_1528_sailing-model-controls.md) —
+  force-based sailing (`sailing.js`): momentum, leeway, heel and hiking,
+  rudder that needs way on, gusts; mainsheet on ↑/↓ (W/S); rudder, leeway
+  and VMG in the readout.
+
 ## 2026-11-06
 
 - [Laser sail window a quarter as tall](20261106_2054_laser-sail-window.md) —

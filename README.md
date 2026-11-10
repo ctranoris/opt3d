@@ -245,7 +245,7 @@ seven camera presets.
 | **Heading** | compass course of the bow; turns the boat on the compass rose |
 | **Wind** | breeze strength — drives heel, sail load and luff sag |
 | **Draft** | how deep the sail is foiled |
-| **Auto sail** | puts the boom out to leeward at the right angle for the wind, gybing across when the wind changes side |
+| **Auto sail** | puts the boom out to leeward at the angle that drives her hardest, easing it when she is overpowered, and gybing across when the wind changes side |
 | **Sea motion** | float her on the waves |
 | **Boat** | Optimist or ILCA 4 / Laser 4.7; remembered in a cookie (`opt3d_boat`, one year) and the page reloads to build the new boat. `?boat=optimist` or `?boat=laser` in the address overrides the cookie |
 | **Country / Sail no.** | the national letters and sail number on your sail (default GRE 1060); remembered in a cookie (`opt3d_sail`, one year) |
@@ -258,13 +258,15 @@ seven camera presets.
 | **Race course** | lays an Optimist Worlds trapezoid for the present wind just upwind of the boat: a start line between two orange flagged buoys, red marks 1 and 2, a leeward gate 3S / 3P, and a finish line between two blue flagged buoys |
 | **Fleet** | twelve more boats of the same type racing round the marks: GRE 1062, 105, 1054 and 1055 (girls), and 1057, 1058, 128, 3153, 1052, 2737, 2828 and 2628 (boys); turns the course on |
 | **Re-lay course** | lays the course again for the wind and position you have now and starts a 10 s countdown: all 13 boats, yours in the middle, are lined up about 3 m apart, 6 m below the 40 m start line, head to wind. A horn sounds at 10 s, a beep each of the last 5 seconds, and a long horn at the gun |
-| **← / → or A / D** | steer: turns the bow at 40°/s, and the camera swings round with her |
+| **← / → or A / D** | the helm: puts the rudder over (up to 35°), and the camera swings round with her. She turns with the water flowing past the rudder, so the faster she goes the quicker she turns; stopped, she can only be sculled round slowly (12°/s). Hands off, the sailor holds her course |
+| **↑ / ↓ or W / S** | the mainsheet: haul in, let out (45°/s). This turns Auto sail off and takes the sheet in hand: the boom is free to swing to leeward as far as the sheet lets it, and streams along the wind when the sheet is slack. Moving the Mainsheet slider or dragging the sail holds the boom where you put it instead |
 
 **Drag the sail** in the viewport to swing the boom to any angle on either
 side. Orbit with the left button, zoom with the wheel.
 
 **Racing.** With the course laid, steer with the arrow keys (Auto sail
-trims for you). After **Re-lay course**, the clock starts at the gun; cross
+trims for you, or take the sheet yourself with ↑ / ↓). Bear away to gather
+way before you tack, and keep the helm over until she is through the wind. After **Re-lay course**, the clock starts at the gun; cross
 the start line going upwind after it. Over the line before the gun (OCS), you
 have to dip back below it before you can start. When the course is first
 switched on there is no countdown: crossing the line starts the clock. Then
@@ -324,12 +326,45 @@ The sail responds to the wind: a small model works out the true and
 apparent wind angles from the course, fills the cloth on the side the wind
 pushes it (it luffs and flutters when the wind runs along it, as in irons,
 and bellies the other way when aback), and sets the heel and boat speed from
-the force on the sail. She makes way at that speed: the boat stays in the
+the force on the sail.
+
+**How she sails** (`sailing.js`, a force model with no three.js in it):
+
+- **Sail.** Lift and drag from the angle the apparent wind meets the cloth.
+  It luffs below about 8°, pulls hardest near 22° and stalls beyond that;
+  square to the wind on a run it works by drag alone.
+- **Momentum.** She has mass, so she takes a few seconds to gather way and
+  carries it through a tack. Head to wind the sail only drags, and she
+  stops and then drifts astern: in irons. Scull her round with the helm.
+- **Leeway.** The daggerboard holds her against the side force only when
+  she is moving. Close-hauled she slips 4–7° to leeward; stopped with the
+  sail sheeted in, she goes sideways.
+- **Heel and hiking.** The side force heels her against the hull's
+  stiffness and the sailor's weight. The sailor hikes as far as is needed,
+  a moment late, so a gust heels her before she comes flat again. Above
+  about 16 kn close-hauled the sailor is fully out and she heels on; Auto
+  sail eases the sheet to hold her.
+- **Rudder.** It needs flow to work, it slows her when it is over, and it
+  works backwards when she is going astern. Heeled, she wants to luff up
+  (weather helm); with hands off the keys the sailor holds a few degrees of
+  rudder against it, which you can see on the blade and in the readout.
+- **Gusts and shifts.** The wind she feels varies by about 15% in strength
+  and 5° in direction. The fleet sails in the steady wind.
+
+An Optimist in 8 kn of wind makes about 3.3 kn on a beam reach, 2.6 kn
+close-hauled at 60° to the true wind (her best course to windward, as for
+the fleet) and 2.5 kn on a run. A tack takes about 5 s and costs two thirds
+of her speed. `node .tools/polar.mjs` prints the full table next to the
+fleet's polar.
+
+She makes way at that speed, and to leeward by her leeway: the boat stays in the
 middle of the compass rose and the sea moves past her (the waves and the
 foam drift astern), with white water drawn in the water shader - a bow
 wave, foam along her sides, churned water off the transom and the two arms
 of the wake - all growing with her speed. The readout shows the wind, heading, true wind angle,
-boom angle, heel and speed; the masthead vane points into the apparent wind.
+boom angle, heel and speed, then the rudder angle, the leeway and the VMG
+(speed made good to windward, negative downwind); the masthead vane points
+into the apparent wind.
 
 By default the wind is from the north and she heads west, so it comes over
 her **starboard** side and the boom is out to port. The **Quarter** (the
@@ -437,6 +472,8 @@ Verification scripts live in `.tools/` and drive headless Chrome
 | `.tools/inspect.mjs` | geometry audit — degenerate triangles and bounds per mesh |
 | `.tools/parts.js` | hides one named part and screenshots, for identifying geometry |
 | `.tools/xray.js` | renders with the sail hidden, to inspect the spars |
+| `.tools/polar.mjs` | prints the sailing model's speed polar next to the fleet's (plain Node, no browser) |
+| `.tools/sail.js` | sails her in the real page with the keys (reach, luff, tack, sheet in and out) and prints the state; serves the repo itself |
 
 `shot.js` waits on camera-position stability and rendered frames rather than
 fixed delays, because software GL runs at a few frames a second and the
@@ -463,6 +500,10 @@ entry point.
   reads correctly for trim and it flattens where the sprit presses it, but
   there is no flutter, no luffing oscillation, and no interaction with
   apparent wind.
-- **No foils in the water** — the daggerboard and rudder are modelled, but
-  there is no hydrodynamics. The heel and leeway you see are dressed for
-  looks from the wind and trim sliders, not solved.
+- **The sailing model is a simple one.** `sailing.js` balances forces in
+  the horizontal plane with coefficients tuned by hand to give plausible
+  speeds, not measured ones. She cannot capsize (heel stops at 42°), does
+  not plane, and the daggerboard is always down. The fleet still sails the
+  older speed polar, so your boat and the fleet's are only roughly matched:
+  yours is a little faster to windward, level on a reach and about 15%
+  slower on a run.

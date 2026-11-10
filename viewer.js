@@ -21,6 +21,7 @@ import { createFleet, FLEET_N } from './fleet.js';
 import { createSailor } from './sailor.js';
 import { createMountains } from './mountains.js';
 import { createSound } from './sound.js';
+import { sailParams, newHullState, stepBoat, bestBoom, KN } from './sailing.js';
 
 const D2R = Math.PI / 180;
 const wrap180 = (d) => ((d % 360) + 540) % 360 - 180;
@@ -467,6 +468,14 @@ const state = {
   speed: 0,     // boat speed, in the same units as `wind`
   heel: 0,      // degrees, + to port
   twa: 0, awa: 0, app: 0,
+  leewaySpeed: 0,   // sideways slip, + to port, same units as `wind`
+  rudder: 0,        // degrees, + turns her to starboard
+  hike: 0,          // 0..1: how far out the sailor's weight is
+  // Sheet in hand (the up/down keys): the boom is free to swing to leeward
+  // as far as `sheetOut` degrees of sheet let it.  Off while the slider or
+  // a drag holds the boom where it was put.
+  freeBoom: false,
+  sheetOut: 26,
   // the old 0..1 "eased" control, kept for scripts: eased to port
   get sheet() { return Math.min(1, Math.abs(this.boom) / 74); },
   set sheet(v) { this.boom = -v * 74; },
@@ -730,14 +739,14 @@ function animate() {
   }
 
   if (state.spin) setHeading(state.heading + dt * 15);   // turntable
-  steer(dt);
-
+  // bowV and portV are from before this step's turn, as the speeds are
+  courseVectors();
   sailTrim(dt, t);
 
-  // Make way: move the sea astern at her speed (kn -> m/s).
-  const ms = state.speed * 18 * 0.5144;
-  odo.x += bowV.x * ms * dt;
-  odo.y += bowV.z * ms * dt;
+  // Make way: move the sea astern at her speed, and to windward by her
+  // leeway (hull.u forward and hull.v to port, m/s).
+  odo.x += (bowV.x * hull.u + portV.x * hull.v) * dt;
+  odo.y += (bowV.z * hull.u + portV.z * hull.v) * dt;
 
   // the course and the fleet ride on the water
   seaFrame.position.set(-odo.x, 0, -odo.y);
@@ -778,9 +787,11 @@ function animate() {
     wind: state.wind,
     t,
   });
+  boat.rudder.pivot.rotation.y = state.rudder * D2R;   // blade to starboard turns her to starboard
   helm.updateMatrixWorld(true);
   updateMainsheet(boat.rig, boat.cleatRig);
-  if (state.sailor) sailor.update({ boomDeg: state.boom, heel: state.heel, t, boat });
+  // the sailor hikes to keep her flat, so go by the effort as well as the heel
+  if (state.sailor) sailor.update({ boomDeg: state.boom, heel: Math.max(Math.abs(state.heel), 3 + 13 * state.hike), t, boat });
 
   const U = water.material.uniforms;
   U.uTime.value = t;
@@ -811,16 +822,19 @@ function animate() {
 }
 
 /* ------------------------------------------------------------------ *
- * steering from the keyboard: left/right arrows or A/D
+ * sailing from the keyboard: left/right arrows or A/D put the helm over,
+ * up/down arrows or W/S haul the mainsheet in and let it out
  * ------------------------------------------------------------------ */
 
 const keys = new Set();
-const TURN_RATE = 40;   // deg/s
+const SHEET_RATE = 45;  // deg of boom a second
+const SAIL_KEYS = ['arrowleft', 'arrowright', 'a', 'd', 'arrowup', 'arrowdown', 'w', 's'];
 addEventListener('keydown', (e) => {
   const el = document.activeElement;
   if (el && (el.tagName === 'INPUT' && el.type === 'text')) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
-  if (['arrowleft', 'arrowright', 'a', 'd'].includes(k)) {
+  if (SAIL_KEYS.includes(k)) {
     keys.add(k);
     e.preventDefault();          // don't nudge a focused slider as well
   }
@@ -828,13 +842,35 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 addEventListener('blur', () => keys.clear());
 
-/** Turn the bow, and swing the camera round with her so the view follows. */
-function steer(dt) {
+/** The helm: -1 to port, +1 to starboard, 0 hands off (she holds her course). */
+function helmInput() {
   let dir = 0;
   if (keys.has('arrowleft') || keys.has('a')) dir -= 1;
   if (keys.has('arrowright') || keys.has('d')) dir += 1;
-  if (!dir) return;
-  const dh = dir * TURN_RATE * dt;
+  return dir;
+}
+
+/**
+ * The mainsheet keys: up hauls in, down lets out.  Taking the sheet in
+ * hand turns Auto sail off and frees the boom to swing to leeward.
+ */
+function sheetInput(dt) {
+  let d = 0;
+  if (keys.has('arrowup') || keys.has('w')) d -= 1;
+  if (keys.has('arrowdown') || keys.has('s')) d += 1;
+  if (!d) return;
+  if (state.autoSail || !state.freeBoom) {
+    state.sheetOut = clamp(Math.abs(state.boom), 0, 90);
+    state.freeBoom = true;
+    state.autoSail = false;
+    ui.autoSail.checked = false;
+  }
+  state.sheetOut = clamp(state.sheetOut + d * SHEET_RATE * dt, 0, 90);
+}
+
+/** Turn the bow, and swing the camera round with her so the view follows. */
+function turn(dh) {
+  if (!dh) return;
   setHeading(state.heading + dh);
   const yaw = -dh * D2R;
   for (const v of [camera.position, controls.target]) {
@@ -936,7 +972,8 @@ function layCourse(countdown = false) {
     v.x += MID;
   }
   setHeading(state.windFrom);
-  state.speed = 0; state.heel = 0; state.fill = 0;
+  Object.assign(hull, newHullState());
+  state.speed = 0; state.leewaySpeed = 0; state.heel = 0; state.fill = 0;
 }
 
 // race signals: a horn at 10 s, a beep each of the last 5, a long horn at the gun
@@ -989,17 +1026,21 @@ function setFleet(on) {
 /* ------------------------------------------------------------------ *
  * sailing: wind, trim, speed and heel
  *
- * A small steady-state model, just enough for the sail, the vane and the
- * heel to agree with the wind and the course.  All in the horizontal plane.
+ * The forces are worked out in sailing.js: lift and drag on the sail,
+ * hull resistance, leeway against the foils, heel against the sailor's
+ * weight, and a rudder that needs way on to turn her.  Here the wind is
+ * put into her frame, the boom is trimmed, and the result is applied.
  * ------------------------------------------------------------------ */
+
+const hull = newHullState();           // speeds in m/s, see sailing.js
+const PHYS = sailParams(BS.key);
+const MS = 18 * KN;                    // m/s in one unit of `state.wind`
+const gustFlow = new THREE.Vector3();
 
 const trueFlow = new THREE.Vector3(), appFlow = new THREE.Vector3();
 const bowV = new THREE.Vector3(), portV = new THREE.Vector3();
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smoothstep = (e0, e1, x) => { const u = clamp((x - e0) / (e1 - e0), 0, 1); return u * u * (3 - 2 * u); };
-
-/** Boom angle off the centreline that sets the sail for an apparent wind angle. */
-const optimalBoom = (awa) => clamp(awa * 0.55 - 12, 0, 88);
 
 /** Bow and port unit vectors in the world for the current heading. */
 function courseVectors() {
@@ -1016,50 +1057,60 @@ function windFromPort() {
 }
 
 function sailTrim(dt, t) {
-  courseVectors();
   windFlow(state.windFrom, trueFlow);
   state.twa = Math.acos(clamp(-trueFlow.dot(bowV), -1, 1)) / D2R;
 
+  // The wind she feels is never steady: gusts and lulls of some 15%, and
+  // the direction wandering a few degrees either side.
+  const gust = 1 + 0.10 * Math.sin(t * 0.23) + 0.06 * Math.sin(t * 0.61 + 1.3) + 0.03 * Math.sin(t * 1.7 + 0.4);
+  const shift = 4 * Math.sin(t * 0.11 + 0.7) + 2 * Math.sin(t * 0.37);
+  windFlow(state.windFrom + shift, gustFlow);
+
   // Apparent wind: the true wind less the boat's own way through the water.
-  appFlow.copy(trueFlow).multiplyScalar(state.wind).addScaledVector(bowV, -state.speed);
+  appFlow.copy(gustFlow).multiplyScalar(state.wind * gust)
+    .addScaledVector(bowV, -state.speed).addScaledVector(portV, -state.leewaySpeed);
   const ax = -appFlow.dot(bowV);                 // boat frame: air moving aft
   const az = appFlow.dot(portV);                 // ... and toward port
   const app = Math.hypot(ax, az);
   state.app = app;
   state.awa = app > 1e-5 ? Math.acos(clamp(ax / app, -1, 1)) / D2R : 0;
 
-  if (state.autoSail) {
-    // boom to leeward; dead downwind, stay on the gybe she is on
+  sheetInput(dt);
+  if (state.autoSail || state.freeBoom) {
+    // boom to leeward; dead downwind it stays on the gybe she is on until
+    // the wind is well round the back of the sail
     let side = az > 0 ? -1 : 1;                  // air going to port: boom to port
-    if (state.awa > 168 && Math.abs(state.boom) > 1) side = Math.sign(state.boom);
-    const want = side * Math.max(0, optimalBoom(state.awa)
-      + 3 * Math.sin(t * 0.31) + 1.5 * Math.sin(t * 0.83 + 1.1));
-    const step = 70 * dt;                        // the boom swings across, not jumps
+    if (state.awa > 165 && Math.abs(state.boom) > 1) side = Math.sign(state.boom);
+    let want, step;
+    if (state.autoSail) {
+      // the angle that drives her hardest without overpowering the sailor
+      want = bestBoom(PHYS, ax * MS, az * MS) + 1.5 * Math.sin(t * 0.83 + 1.1);
+      step = 70 * dt;                            // the boom swings across, not jumps
+    } else {
+      // Sheet in hand: the wind carries the boom out as far as the sheet
+      // lets it, and no further than streaming along the wind.
+      want = Math.min(state.sheetOut, state.awa);
+      step = (25 + 260 * app) * dt;
+    }
+    want = side * clamp(want, 0, 90);
     state.boom += clamp(want - state.boom, -step, step);
     showBoom();
   }
 
-  // How the wind meets the cloth: its component across the sail's chord.
-  // For boom angle a the side the cloth bellies to when fill > 0 is
-  // (sin a, cos a) in the boat's (aft, port) plane.
-  const a = state.boom * D2R;
-  const across = app > 1e-5 ? (ax * Math.sin(a) + az * Math.cos(a)) / app : 0;
-  const fillT = clamp(across / 0.35, -1, 1);
+  // The forces, and what they do to her (sailing.js works in m/s).
+  const f = stepBoat(hull, PHYS, ax * MS, az * MS, state.boom, helmInput(), dt);
+
+  // How the wind meets the cloth: its component across the sail's chord
+  // fills it on one side or the other, or lets it shake.
+  const fillT = clamp(f.across / 0.35, -1, 1);
   state.fill += clamp(fillT - state.fill, -6 * dt, 6 * dt);
 
-  // Force normal to the sail: drive ahead, and heel.
-  const cn = clamp(4 * across, -1.2, 1.2);
-  const drive = -cn * Math.sin(a);               // forward is -x
-  const heelT = 14 * app * cn * Math.cos(a);     // + heels to port
-  state.heel += (heelT - state.heel) * Math.min(1, dt / 0.9);
-
-  // Speed: a simple polar for the course, scaled by how well she is
-  // trimmed - nothing in irons, nothing with the sail aback.
-  const polar = smoothstep(32, 75, state.twa) * (1 - 0.12 * smoothstep(110, 180, state.twa));
-  const trim = Math.max(0, 1 - Math.abs(Math.abs(state.boom) - optimalBoom(state.awa)) / 50);
-  const e = drive > 0 ? trim * Math.min(1, Math.abs(state.fill)) : 0;
-  const target = 0.42 * BS.speedK * state.wind * polar * e;
-  state.speed += (target - state.speed) * Math.min(1, dt / 2.5);
+  state.heel = hull.heel;
+  state.hike = hull.hike;
+  state.rudder = hull.rudder;
+  state.speed = hull.u / MS;
+  state.leewaySpeed = hull.v / MS;
+  turn(hull.yawRate * dt);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1246,10 +1297,14 @@ function updateReadout() {
   const heel = state.heel * (state.seaMotion ? 1 : 0.55);
   const kn = (state.wind * 18).toFixed(0);
   const side = windFromPort() ? 'port' : 'stbd';
+  // leeway: how far her track falls off her heading; VMG: speed made good to windward
+  const leeway = Math.abs(hull.u) > 0.15 ? Math.min(90, Math.abs(Math.atan2(hull.v, Math.abs(hull.u))) / D2R) : 0;
+  const vmg = (-(bowV.dot(trueFlow)) * hull.u - portV.dot(trueFlow) * hull.v) / KN;
   readout.innerHTML =
     `<b>${kn} kn</b> wind from <b>${pad3(state.windFrom)}&deg; ${cardinal(state.windFrom)}</b><br>` +
     `heading <b>${pad3(state.heading)}&deg; ${cardinal(state.heading)}</b> &nbsp; TWA <b>${state.twa.toFixed(0)}&deg;</b> ${side}<br>` +
     `boom <b>${fmtBoom(state.boom)}</b> &nbsp; heel <b>${Math.abs(heel).toFixed(1)}&deg;</b> &nbsp; speed <b>${(state.speed * 18).toFixed(1)} kn</b><br>` +
+    `rudder <b>${fmtBoom(state.rudder)}</b> &nbsp; leeway <b>${leeway.toFixed(0)}&deg;</b> &nbsp; VMG <b>${vmg.toFixed(1)} kn</b><br>` +
     `LOA ${BS.loa.toFixed(2)} m &middot; beam ${BS.beam.toFixed(2)} m &middot; sail <b>${sailArea.toFixed(1)} m&sup2;</b>`;
 }
 
@@ -1355,7 +1410,7 @@ function bindUI() {
     $('camberOut').textContent = ui.camber.value + '%';
   };
   ['sheet', 'wind', 'camber'].forEach((k) => ui[k].addEventListener('input', () => {
-    if (k === 'sheet') { state.autoSail = false; ui.autoSail.checked = false; }
+    if (k === 'sheet') { state.autoSail = false; state.freeBoom = false; ui.autoSail.checked = false; }
     sync();
   }));
   ui.windDir.addEventListener('input', () => setWindFrom(+ui.windDir.value));
@@ -1436,6 +1491,7 @@ function bindUI() {
     const sailorShown = sailor.group.visible;
     sailor.group.visible = false;
     sailor.release(boat);
+    boat.rudder.pivot.rotation.y = 0;      // helm amidships; animate() sets it again
     helm.updateMatrixWorld(true);
     const restore = () => {
       sailor.group.visible = sailorShown;
@@ -1525,6 +1581,7 @@ function pointerToSheet(ev) {
   state.boom = Math.atan2(-dz, dx) / D2R;
   ui.autoSail.checked = false;
   state.autoSail = false;
+  state.freeBoom = false;
   showBoom();
 }
 
@@ -1579,6 +1636,7 @@ try {
 window.OPTi = {
   get boat() { return boat; },
   get state() { return state; },
+  hull, keys,
   get sailor() { return sailor; },
   setSailor,
   setMountains,
